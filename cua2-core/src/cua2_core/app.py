@@ -4,8 +4,8 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.services.agent_service import AgentService
-from backend.websocket.websocket_manager import WebSocketManager
+from cua2_core.services.agent_service import AgentService
+from cua2_core.websocket.websocket_manager import WebSocketManager
 
 # Load environment variables
 load_dotenv()

@@ -6,7 +6,6 @@ build-backend = "hatchling.build"
 name = "cua2-core"
 version = "0.0.0-dev.0"
 description = "Backend API server for Computer Use Agent"
-readme = "README.md"
 authors = [{ name = "Amir Mahla", email = "amir.mahla@icloud.com" }]
 keywords = ["fastapi", "api", "backend", "automation"]
 classifiers = [
@@ -61,12 +60,11 @@ Homepage = "https://github.com/huggingface/CUA2"
 Repository = "https://github.com/huggingface/CUA2"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/cua2-core"]
+packages = ["src/cua2_core"]
 
 [tool.hatch.build.targets.sdist]
 include = [
     "/src",
-    "/README.md",
 ]
 
 [tool.coverage.run]

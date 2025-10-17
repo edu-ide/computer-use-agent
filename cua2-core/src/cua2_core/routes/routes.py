@@ -3,9 +3,9 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 # Get services from app state
-from backend.models.models import HealthResponse
-from backend.services.agent_service import AgentService
-from backend.websocket.websocket_manager import WebSocketManager
+from cua2_core.models.models import HealthResponse
+from cua2_core.services.agent_service import AgentService
+from cua2_core.websocket.websocket_manager import WebSocketManager
 
 # Create router
 router = APIRouter()

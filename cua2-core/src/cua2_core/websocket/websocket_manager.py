@@ -4,7 +4,7 @@ from typing import Dict, Optional, Set
 
 from fastapi import WebSocket
 
-from backend.models.models import AgentMetadata, WebSocketEvent
+from cua2_core.models.models import AgentTraceMetadata, WebSocketEvent
 
 
 class WebSocketManager:
@@ -35,7 +35,7 @@ class WebSocketManager:
     ):
         """Send a message to a specific WebSocket connection"""
         try:
-            await websocket.send_text(json.dumps(message.model_dump()))
+            await websocket.send_text(json.dumps(message.model_dump(mode="json")))
         except Exception as e:
             print(f"Error sending personal message: {e}")
             # Only disconnect if the connection is still in our set
@@ -52,7 +52,7 @@ class WebSocketManager:
 
         for connection in self.active_connections.copy():
             try:
-                await connection.send_text(json.dumps(message.model_dump()))
+                await connection.send_text(json.dumps(message.model_dump(mode="json")))
             except Exception as e:
                 print(f"Error broadcasting to connection: {e}")
                 disconnected.append(connection)
@@ -77,7 +77,7 @@ class WebSocketManager:
         await self.broadcast(event)
 
     async def send_agent_complete(
-        self, content: str, message_id: str, metadata: Optional[AgentMetadata] = None
+        self, content: str, message_id: str, metadata: Optional[AgentTraceMetadata] = None
     ):
         """Send agent complete event"""
         event = WebSocketEvent(

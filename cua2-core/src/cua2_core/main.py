@@ -1,10 +1,9 @@
 import os
 
 import uvicorn
-
-from backend.app import app
-from backend.routes.routes import router
-from backend.routes.websocket import router as websocket_router
+from cua2_core.app import app
+from cua2_core.routes.routes import router
+from cua2_core.routes.websocket import router as websocket_router
 
 # Include routes
 app.include_router(router, prefix="/api/v1")
@@ -14,7 +13,7 @@ app.include_router(websocket_router)
 # Health check endpoint (without prefix)
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "service": "computer-use-studio-backend"}
+    return {"status": "healthy", "service": "cua2-core"}
 
 
 if __name__ == "__main__":
@@ -29,9 +28,10 @@ if __name__ == "__main__":
     print(f"WebSocket endpoint: ws://{host}:{port}/ws")
 
     uvicorn.run(
-        "backend.app:app",
+        "cua2_core.app:app",
         host=host,
         port=port,
-        reload=debug,
+        # reload=debug,
+        reload=True,
         log_level="info" if not debug else "debug",
     )
