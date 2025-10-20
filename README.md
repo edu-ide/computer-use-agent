@@ -118,7 +118,7 @@ npm run dev
 
 ### 5. Access the Application
 
-- **Frontend**: http://localhost:5173
+- **Frontend**: http://localhost:8080
 - **Backend API**: http://localhost:8000
 - **API Documentation**: http://localhost:8000/docs
 - **ReDoc**: http://localhost:8000/redoc
@@ -211,14 +211,5 @@ make clean             # Clean build artifacts and caches
 make pre-commit
 ```
 
-### Build for Production
-
-```bash
-# Frontend
-cd cua2-front
-npm run build
-
-# The build output will be in cua2-front/dist/
-```
 
 **Happy Coding! 🚀**
