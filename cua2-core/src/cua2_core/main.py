@@ -22,7 +22,7 @@ if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
     debug = os.getenv("DEBUG", "false").lower() == "true"
 
-    print(f"Starting Computer Use Studio Backend on {host}:{port}")
+    print(f"Starting Computer Use Backend on {host}:{port}")
     print(f"Debug mode: {debug}")
     print(f"API Documentation: http://{host}:{port}/docs")
     print(f"WebSocket endpoint: ws://{host}:{port}/ws")

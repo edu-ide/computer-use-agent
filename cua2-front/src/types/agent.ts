@@ -1,36 +1,84 @@
-export interface AgentMessage {
+
+export interface AgentTrace {
   id: string;
-  type: 'user' | 'agent';
   timestamp: Date;
-  instructions: string;
+  instruction: string;
   modelId: string;
+  isRunning: boolean;
   steps?: AgentStep[];
-  metadata?: AgentMetadata;
-  isLoading?: boolean;
+  metadata?: AgentTraceMetadata;
 }
 
 export interface AgentStep {
-  messageId: string;
+  traceId: string;
   stepId: string;
+  error: string;
   image: string;
-  generatedText: string;
+  thought: string;
   actions: string[];
+  duration: number;
   inputTokensUsed: number;
   outputTokensUsed: number;
-  timestamp: Date;
+  step_evaluation: 'like' | 'dislike' | 'neutral';
 }
 
-export interface AgentMetadata {
-  messageId: string;
+export interface AgentTraceMetadata {
+  traceId: string;
   inputTokensUsed: number;
   outputTokensUsed: number;
-  timeTaken: number;
+  duration: number;
   numberOfSteps: number;
 }
 
-export interface WebSocketEvent {
-  type: 'agent_start' | 'agent_progress' | 'agent_complete' | 'agent_error' | 'vnc_url_set' | 'vnc_url_unset' | 'heartbeat';
-  agentStep?: AgentStep;
-  metadata?: AgentMetadata;
-  vncUrl?: string;
+// #################### WebSocket Events Types - Server to Client ########################
+
+interface AgentStartEvent {
+  type: 'agent_start';
+  agentTrace: AgentTrace;
+}
+
+interface AgentProgressEvent {
+  type: 'agent_progress';
+  agentStep: AgentStep;
+  traceMetadata: AgentTraceMetadata;
+}
+
+interface AgentCompleteEvent {
+  type: 'agent_complete';
+  traceMetadata: AgentTraceMetadata;
+}
+
+interface AgentErrorEvent {
+  type: 'agent_error';
+  error: string;
+}
+
+interface VncUrlSetEvent {
+  type: 'vnc_url_set';
+  vncUrl: string;
+}
+
+interface VncUrlUnsetEvent {
+  type: 'vnc_url_unset';
+}
+
+interface HeartbeatEvent {
+  type: 'heartbeat';
+}
+
+export type WebSocketEvent =
+  | AgentStartEvent
+  | AgentProgressEvent
+  | AgentCompleteEvent
+  | AgentErrorEvent
+  | VncUrlSetEvent
+  | VncUrlUnsetEvent
+  | HeartbeatEvent;
+
+// #################### User Task Message Type (Through WebSocket) - Client to Server ########################
+
+
+export interface UserTaskMessage {
+  type: 'user_task';
+  trace: AgentTrace;
 }

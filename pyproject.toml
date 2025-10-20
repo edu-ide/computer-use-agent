@@ -1,0 +1,89 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cua2-workspace"
+version = "0.0.0-dev.0"
+description = "CUA2 Workspace - A comprehensive platform for AI automation with desktop environments"
+# readme = "README.md"
+authors = [{ name = "Amir Mahla", email = "amir.mahla@icloud.com" }]
+keywords = ["docker", "automation", "gui", "sandbox", "desktop", "playwright", "ai", "workspace"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Testing",
+    "Topic :: System :: Emulators",
+    "Topic :: Desktop Environment",
+]
+requires-python = ">=3.10"
+
+dependencies = [
+    "cua2-core"
+]
+
+
+[tool.uv.workspace]
+members = [
+    "cua2-core",
+]
+
+[tool.uv.sources]
+cua2-core = { workspace = true }
+
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+    "flake8>=6.0.0",
+    "mypy>=1.0.0",
+    "pre-commit>=3.0.0",
+]
+test = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.0.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["cua2-core/src/cua2-core"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/cua2-core",
+    "/README.md",
+    "/LICENSE",
+]
+
+[tool.coverage.run]
+source = ["cua2-core"]
+omit = [
+    "*/tests/*",
+    "*/test_*",
+    "*/__pycache__/*",
+    "*/migrations/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+]

@@ -1,14 +1,20 @@
 import React from 'react';
 import { useWebSocket } from '@/hooks/useWebSocket';
-import { AgentMessage, WebSocketEvent } from '@/types/agent';
-import { useEffect, useState } from 'react';
+import { WebSocketEvent } from '@/types/agent';
+import { useState } from 'react';
+import { AgentTrace, AgentStep } from '@/types/agent';
+import { ulid } from 'ulid';
+import { Header, VNCStream, Metadata, StackSteps } from '@/components/mock';
 
 const Index = () => {
-  const [messages, setMessages] = useState<AgentMessage[]>([]);
+  const [trace, setTrace] = useState<AgentTrace>();
   const [isAgentProcessing, setIsAgentProcessing] = useState(false);
   const [vncUrl, setVncUrl] = useState<string>('');
+  const [selectedModelId, setSelectedModelId] = useState<string>("claude-sonnet-4-5-20250929");
 
-  // WebSocket connection - Use environment variable for flexibility across environments
+  // #################### WebSocket Connection ########################
+
+  // WebSocket connection - Use environment variable
   // const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws';
   const WS_URL = 'ws://localhost:8000/ws';
 
@@ -18,71 +24,59 @@ const Index = () => {
     switch (event.type) {
       case 'agent_start':
         setIsAgentProcessing(true);
-        if (event.content) {
-          const newMessage: AgentMessage = {
-            id: event.messageId,
-            type: 'agent',
-            instructions: event.instructions,
-            modelId: event.modelId,
-            timestamp: new Date(),
-            isLoading: true,
-          };
-          setMessages(prev => [...prev, newMessage]);
-        }
+        setTrace(event.agentTrace);
+        console.log('Agent start received:', event.agentTrace);
         break;
 
       case 'agent_progress':
-        if (event.messageId && event.agentStep) {
-          // Add new step from a agent trace run with image, generated text, actions, tokens and timestamp
-          setMessages(prev =>
-            prev.map(msg => {
-              if (msg.id === event.agentStep.messageId) {
-                const existingSteps = msg.steps || [];
-                const stepExists = existingSteps.some(step => step.stepId === event.agentStep.stepId);
-                
-                if (!stepExists) {
-                  return { ...msg, steps: [...existingSteps, event.agentStep], isLoading: true };
-                }
-                return msg;
-              }
-              return msg;
-            })
-          );
-        }
+        // Add new step from a agent trace run with image, generated text, actions, tokens and timestamp
+        setTrace(prev => {
+          const existingSteps = prev?.steps || [] as AgentStep[];
+          const stepExists = existingSteps.some(step => step.stepId === event.agentStep.stepId);
+
+          if (!stepExists) {
+            return {
+              ...prev,
+              steps: [...existingSteps, event.agentStep],
+              traceMetadata: event.traceMetadata,
+              isRunning: true
+            };
+          }
+          return prev;
+        });
+        console.log('Agent progress received:', event.agentStep);
         break;
 
       case 'agent_complete':
         setIsAgentProcessing(false);
-        if (event.messageId && event.metadata) {
-          setMessages(prev =>
-            prev.map(msg =>
-              msg.id === event.metadata.messageId
-                ? {
-                  ...msg,
-                  isLoading: false,
-                  metadata: event.metadata,
-                }
-                : msg
-            )
-          );
-        }
+        setTrace(trace => {
+          return trace.id === event.traceMetadata.traceId
+              ? {
+                ...trace,
+                isRunning: false,
+                metadata: event.traceMetadata,
+              }
+              : trace;
+        });
+        console.log('Agent complete received:', event.traceMetadata);
         break;
 
       case 'agent_error':
         setIsAgentProcessing(false);
         // TODO: Handle agent error
+        console.log('Agent error received:', event.error);
         break;
 
       case 'vnc_url_set':
-        if (event.vncUrl) {
-          setVncUrl(event.vncUrl);
-        }
+        setVncUrl(event.vncUrl);
         // TODO: Handle VNC URL set
+        console.log('VNC URL set received:', event.vncUrl);
         break;
 
       case 'vnc_url_unset':
         setVncUrl('');
         // TODO: Handle VNC URL unset
+        console.log('VNC URL unset received:');
         break;
 
       case 'heartbeat':
@@ -92,7 +86,7 @@ const Index = () => {
   };
 
   const handleWebSocketError = () => {
-    // Error handling is now throttled in the WebSocket hook
+    // WebSocket Frontend Error handling
 
   };
 
@@ -102,29 +96,52 @@ const Index = () => {
     onError: handleWebSocketError,
   });
 
-  const handleSendMessage = (content: string) => {
-    const userMessage: AgentMessage = {
-      id: Date.now().toString(),
-      type: 'user',
-      content,
+  // #################### Frontend Functionality ########################
+
+  const handleModelId = (modelId: string) => {
+    setSelectedModelId(modelId);
+  };
+
+  const handleSendNewTask = (content: string, modelId: string) => {
+    const trace: AgentTrace = {
+      id: ulid(),
+      instruction: content,
+      modelId: selectedModelId,
       timestamp: new Date(),
+      isRunning: true,
     };
 
-    setMessages(prev => [...prev, userMessage]);
+    setTrace(trace);
 
     // Send message to Python backend via WebSocket
     sendMessage({
       type: 'user_task',
-      content,
-      model_id: "anthropic/claude-sonnet-4-5-20250929",
-      timestamp: new Date().toISOString(),
+      trace: trace,
     });
   };
 
+  // #################### Mock Frontend Rendering ########################
 
   return (
-    <div>
-      <h1>Hello World</h1>
+    <div style={{ height: '100%', width: '100%', display: 'flex', flexDirection: 'column', backgroundColor: '#f3f4f6' }}>
+      <Header
+        isConnected={isConnected}
+        isAgentProcessing={isAgentProcessing}
+        onSendTask={handleSendNewTask}
+      />
+
+      <div style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', overflow: 'hidden', minHeight: 0, padding: '32px' }}>
+        <div style={{ width: '100%', height: '100%', maxWidth: '1400px', maxHeight: '900px', display: 'flex', flexDirection: 'row', overflow: 'hidden' }}>
+          {/* Left Side: VNC Stream + Metadata */}
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '20px 12px', gap: '20px', minWidth: 0 }}>
+            <VNCStream vncUrl={vncUrl} />
+            <Metadata trace={trace} />
+          </div>
+
+          {/* Right Side: Stack Steps */}
+          <StackSteps trace={trace} />
+        </div>
+      </div>
     </div>
   );
 };

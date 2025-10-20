@@ -1,11 +1,10 @@
 from contextlib import asynccontextmanager
 
+from cua2_core.services.agent_service import AgentService
+from cua2_core.websocket.websocket_manager import WebSocketManager
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
-from cua2_core.services.agent_service import AgentService
-from cua2_core.websocket.websocket_manager import WebSocketManager
 
 # Load environment variables
 load_dotenv()
@@ -39,8 +38,8 @@ async def lifespan(app: FastAPI):
 
 # Create FastAPI app with lifespan
 app = FastAPI(
-    title="Computer Use Studio Backend",
-    description="Backend API for Computer Use Studio - AI-powered automation interface",
+    title="Computer Use Backend",
+    description="Backend API for Computer Use - AI-powered automation interface",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",

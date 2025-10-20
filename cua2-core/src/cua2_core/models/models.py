@@ -1,57 +1,68 @@
 import json
 import os
 from datetime import datetime
-from enum import Enum
-from typing import Annotated, Literal, TypeAlias
+from typing import Annotated, Literal, Optional
 
 from pydantic import BaseModel, Field, field_serializer, model_validator
+from typing_extensions import TypeAlias
 
 #################### Backend -> Frontend ########################
+
 
 class AgentAction(BaseModel):
     """Agent action structure"""
 
-    actionType: Literal["click", "write", "press", "scroll", "wait", "open", "launch_app", "refresh", "go_back"]
+    actionType: Literal[
+        "click",
+        "write",
+        "press",
+        "scroll",
+        "wait",
+        "open",
+        "launch_app",
+        "refresh",
+        "go_back",
+    ]
     actionArguments: dict
 
     def to_string(self) -> str:
         """Convert action to a human-readable string"""
         action_type = self.actionType
         args = self.actionArguments
-        
+
         if action_type == "click":
             x = args.get("x", "?")
             y = args.get("y", "?")
             return f"Click at coordinates ({x}, {y})"
-        
+
         elif action_type == "write":
             text = args.get("text", "")
             return f"Type text: '{text}'"
-        
+
         elif action_type == "press":
             key = args.get("key", "")
             return f"Press key: {key}"
-        
+
         elif action_type == "scroll":
             direction = args.get("direction", "down")
             amount = args.get("amount", 2)
             return f"Scroll {direction} by {amount}"
-        
+
         elif action_type == "wait":
             seconds = args.get("seconds", 0)
             return f"Wait for {seconds} seconds"
-        
+
         elif action_type == "open":
             file_or_url = args.get("file_or_url", "")
             return f"Open: {file_or_url}"
-        
+
         elif action_type == "launch_app":
             app_name = args.get("app_name", "")
             return f"Launch app: {app_name}"
-        
+
         elif action_type == "refresh":
             return "Refresh the current page"
-        
+
         elif action_type == "go_back":
             return "Go back one page"
 
@@ -62,19 +73,19 @@ class AgentStep(BaseModel):
     traceId: str
     stepId: str
     image: str
-    thought: str
-    actions: list[AgentAction]
-    timeTaken: float
+    duration: float
     inputTokensUsed: int
     outputTokensUsed: int
-    timestamp: datetime
-    step_evaluation: Literal['like', 'dislike', 'neutral']
-    
-    @field_serializer('actions')
+    step_evaluation: Literal["like", "dislike", "neutral"]
+    error: Optional[str] = None
+    thought: Optional[str] = None
+    actions: Optional[list[AgentAction]] = None
+
+    @field_serializer("actions")
     def serialize_actions(self, actions: list[AgentAction], _info):
         """Convert actions to list of strings when dumping (controlled by context)"""
 
-        if _info.context and _info.context.get('actions_as_json', False):
+        if _info.context and _info.context.get("actions_as_json", False):
             return [action.model_dump(mode="json") for action in actions]
 
         return [action.to_string() for action in actions]
@@ -86,8 +97,9 @@ class AgentTraceMetadata(BaseModel):
     traceId: str = ""
     inputTokensUsed: int = 0
     outputTokensUsed: int = 0
-    timeTaken: float = 0.0  # in seconds
+    duration: float = 0.0  # in seconds
     numberOfSteps: int = 0
+    maxSteps: int = 0
 
 
 class AgentTrace(BaseModel):
@@ -208,7 +220,11 @@ class ActiveTask(BaseModel):
         self.traceMetadata.traceId = self.message_id
         os.makedirs(self.trace_path, exist_ok=True)
         with open(f"{self.trace_path}/tasks.json", "w") as f:
-            json.dump(self.model_dump(mode="json", context={"actions_as_json": True}), f, indent=2)
+            json.dump(
+                self.model_dump(mode="json", context={"actions_as_json": True}),
+                f,
+                indent=2,
+            )
 
         return self
 
@@ -219,3 +235,17 @@ class HealthResponse(BaseModel):
     status: str
     timestamp: datetime
     websocket_connections: int
+
+
+class TaskStatusResponse(BaseModel):
+    """Response for a specific task status"""
+
+    task_id: str
+    status: ActiveTask
+
+
+class ActiveTasksResponse(BaseModel):
+    """Response for active tasks"""
+
+    active_tasks: dict[str, ActiveTask]
+    total_connections: int

@@ -1,10 +1,9 @@
 import json
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-
 # Get services from app state
 from cua2_core.app import app
-from cua2_core.models.models import UserTaskMessage, AgentTrace, HeartbeatEvent
+from cua2_core.models.models import AgentTrace, HeartbeatEvent
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 # Create router
 router = APIRouter()
@@ -34,7 +33,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     # Parse the message
                     message_data = json.loads(data)
                     print(f"Received message: {message_data}")
-                    
+
                     # Check if it's a user task message
                     if message_data.get("type") == "user_task":
                         # Extract and parse the trace
@@ -43,10 +42,13 @@ async def websocket_endpoint(websocket: WebSocket):
                             # Convert timestamp string to datetime if needed
                             if isinstance(trace_data.get("timestamp"), str):
                                 from datetime import datetime
-                                trace_data["timestamp"] = datetime.fromisoformat(trace_data["timestamp"].replace("Z", "+00:00"))
-                            
+
+                                trace_data["timestamp"] = datetime.fromisoformat(
+                                    trace_data["timestamp"].replace("Z", "+00:00")
+                                )
+
                             trace = AgentTrace(**trace_data)
-                            
+
                             # Process the user task with the trace
                             trace_id = await agent_service.process_user_task(trace)
                             print(f"Started processing trace: {trace_id}")
@@ -56,9 +58,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 except json.JSONDecodeError as e:
                     print(f"JSON decode error: {e}")
                     from cua2_core.models.models import AgentErrorEvent
+
                     error_response = AgentErrorEvent(
-                        type="agent_error", 
-                        error="Invalid JSON format"
+                        type="agent_error", error="Invalid JSON format"
                     )
                     await websocket_manager.send_personal_message(
                         error_response, websocket
@@ -67,11 +69,12 @@ async def websocket_endpoint(websocket: WebSocket):
                 except Exception as e:
                     print(f"Error processing message: {e}")
                     import traceback
+
                     traceback.print_exc()
                     from cua2_core.models.models import AgentErrorEvent
+
                     error_response = AgentErrorEvent(
-                        type="agent_error",
-                        error=f"Error processing message: {str(e)}"
+                        type="agent_error", error=f"Error processing message: {str(e)}"
                     )
                     await websocket_manager.send_personal_message(
                         error_response, websocket

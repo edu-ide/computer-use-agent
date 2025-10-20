@@ -2,9 +2,8 @@ import asyncio
 import json
 from typing import Dict, Optional, Set
 
-from fastapi import WebSocket
-
 from cua2_core.models.models import AgentTraceMetadata, WebSocketEvent
+from fastapi import WebSocket
 
 
 class WebSocketManager:
@@ -77,7 +76,10 @@ class WebSocketManager:
         await self.broadcast(event)
 
     async def send_agent_complete(
-        self, content: str, message_id: str, metadata: Optional[AgentTraceMetadata] = None
+        self,
+        content: str,
+        message_id: str,
+        metadata: Optional[AgentTraceMetadata] = None,
     ):
         """Send agent complete event"""
         event = WebSocketEvent(

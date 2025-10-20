@@ -13,7 +13,7 @@
           }
         }
       ],
-      "timeTaken": 2.3,
+      "duration": 2.3,
       "inputTokensUsed": 1250,
       "outputTokensUsed": 85,
       "timestamp": "2025-10-17T14:30:02.300Z",
@@ -32,7 +32,7 @@
           }
         }
       ],
-      "timeTaken": 1.8,
+      "duration": 1.8,
       "inputTokensUsed": 1180,
       "outputTokensUsed": 72,
       "timestamp": "2025-10-17T14:30:04.100Z",
@@ -51,7 +51,7 @@
           }
         }
       ],
-      "timeTaken": 1.5,
+      "duration": 1.5,
       "inputTokensUsed": 1100,
       "outputTokensUsed": 68,
       "timestamp": "2025-10-17T14:30:05.600Z",
@@ -59,4 +59,3 @@
     }
   ]
 }
-

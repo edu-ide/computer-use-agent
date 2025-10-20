@@ -9,7 +9,6 @@ const App = () => (
       {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
     </Routes>
   </BrowserRouter>
-
 );
 
 export default App;
