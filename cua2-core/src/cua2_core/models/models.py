@@ -1,70 +1,91 @@
 import json
 import os
+import threading
 from datetime import datetime
 from typing import Annotated, Literal, Optional
 
-from pydantic import BaseModel, Field, field_serializer, model_validator
+from cua2_core.services.agent_utils.function_parser import FunctionCall
+from pydantic import BaseModel, Field, PrivateAttr, field_serializer, model_validator
 from typing_extensions import TypeAlias
 
 #################### Backend -> Frontend ########################
 
 
-class AgentAction(BaseModel):
+class AgentAction(FunctionCall):
     """Agent action structure"""
 
-    actionType: Literal[
-        "click",
-        "write",
-        "press",
-        "scroll",
-        "wait",
-        "open",
-        "launch_app",
-        "refresh",
-        "go_back",
-    ]
-    actionArguments: dict
+    @classmethod
+    def from_function_calls(
+        cls, function_calls: list[FunctionCall]
+    ) -> list["AgentAction"]:
+        list_of_actions = [cls(**action.model_dump()) for action in function_calls]
+        for action in list_of_actions:
+            action.description = action.to_string()
+        return list_of_actions
 
     def to_string(self) -> str:
         """Convert action to a human-readable string"""
-        action_type = self.actionType
-        args = self.actionArguments
+        action_type = self.function_name
+        args = self.parameters
 
         if action_type == "click":
-            x = args.get("x", "?")
-            y = args.get("y", "?")
+            x = args.get("x") or args.get("arg_0")
+            y = args.get("y") or args.get("arg_1")
             return f"Click at coordinates ({x}, {y})"
 
+        if action_type == "right_click":
+            x = args.get("x") or args.get("arg_0")
+            y = args.get("y") or args.get("arg_1")
+            return f"Right click at coordinates ({x}, {y})"
+
+        if action_type == "double_click":
+            x = args.get("x") or args.get("arg_0")
+            y = args.get("y") or args.get("arg_1")
+            return f"Right click at coordinates ({x}, {y})"
+
+        if action_type == "move_mouse":
+            x = args.get("x") or args.get("arg_0")
+            y = args.get("y") or args.get("arg_1")
+            return f"Move mouse to coordinates ({x}, {y})"
+
         elif action_type == "write":
-            text = args.get("text", "")
+            text = args.get("text") or args.get("arg_0")
             return f"Type text: '{text}'"
 
         elif action_type == "press":
-            key = args.get("key", "")
+            key = args.get("key") or args.get("arg_0")
             return f"Press key: {key}"
-
-        elif action_type == "scroll":
-            direction = args.get("direction", "down")
-            amount = args.get("amount", 2)
-            return f"Scroll {direction} by {amount}"
-
-        elif action_type == "wait":
-            seconds = args.get("seconds", 0)
-            return f"Wait for {seconds} seconds"
-
-        elif action_type == "open":
-            file_or_url = args.get("file_or_url", "")
-            return f"Open: {file_or_url}"
-
-        elif action_type == "launch_app":
-            app_name = args.get("app_name", "")
-            return f"Launch app: {app_name}"
-
-        elif action_type == "refresh":
-            return "Refresh the current page"
 
         elif action_type == "go_back":
             return "Go back one page"
+
+        elif action_type == "drag":
+            x1 = args.get("x1") or args.get("arg_0")
+            y1 = args.get("y1") or args.get("arg_1")
+            x2 = args.get("x2") or args.get("arg_2")
+            y2 = args.get("y2") or args.get("arg_3")
+            return f"Drag from ({x1}, {y1}) to ({x2}, {y2})"
+
+        elif action_type == "scroll":
+            x = args.get("x") or args.get("arg_0")
+            y = args.get("y") or args.get("arg_1")
+            direction = args.get("direction") or args.get("arg_2")
+            amount = args.get("amount") or args.get("arg_3") or 2
+            return f"Scroll {direction} by {amount}"
+
+        elif action_type == "wait":
+            seconds = args.get("seconds") or args.get("arg_0")
+            return f"Wait for {seconds} seconds"
+
+        elif action_type == "open":
+            url = args.get("url") or args.get("arg_0")
+            return f"Open: {url}"
+
+        elif action_type == "final_answer":
+            answer = args.get("answer") or args.get("arg_0")
+            return f"Final answer: {answer}"
+
+        return "Unknown action"
 
 
 class AgentStep(BaseModel):
@@ -85,10 +106,10 @@ class AgentStep(BaseModel):
     def serialize_actions(self, actions: list[AgentAction], _info):
         """Convert actions to list of strings when dumping (controlled by context)"""
 
-        if _info.context and _info.context.get("actions_as_json", False):
+        if _info.context and _info.context.get("actions_as_json", True):
             return [action.model_dump(mode="json") for action in actions]
 
-        return [action.to_string() for action in actions]
+        return [action.description for action in actions]
 
 
 class AgentTraceMetadata(BaseModel):
@@ -100,6 +121,7 @@ class AgentTraceMetadata(BaseModel):
     duration: float = 0.0  # in seconds
     numberOfSteps: int = 0
     maxSteps: int = 0
+    completed: bool = False
 
 
 class AgentTrace(BaseModel):
@@ -204,29 +226,54 @@ class ActiveTask(BaseModel):
 
     message_id: str
     instruction: str
-    modelId: str
+    model_id: str
     timestamp: datetime = datetime.now()
     steps: list[AgentStep] = []
     traceMetadata: AgentTraceMetadata = AgentTraceMetadata()
+    _file_lock: threading.Lock = PrivateAttr(default_factory=threading.Lock)
 
     @property
     def trace_path(self):
         """Trace path"""
-        return f"data/trace-{self.message_id}-{self.modelId}"
+        return f"data/trace-{self.message_id}-{self.model_id.replace('/', '-')}"
 
     @model_validator(mode="after")
     def store_model(self):
         """Validate model ID"""
-        self.traceMetadata.traceId = self.message_id
-        os.makedirs(self.trace_path, exist_ok=True)
-        with open(f"{self.trace_path}/tasks.json", "w") as f:
-            json.dump(
-                self.model_dump(mode="json", context={"actions_as_json": True}),
-                f,
-                indent=2,
-            )
+        with self._file_lock:
+            os.makedirs(self.trace_path, exist_ok=True)
+            with open(f"{self.trace_path}/tasks.json", "w") as f:
+                json.dump(
+                    self.model_dump(
+                        mode="json",
+                        exclude={"_file_locks"},
+                        context={"actions_as_json": True},
+                    ),
+                    f,
+                    indent=2,
+                )
 
-        return self
+    def update_step(self, step: AgentStep):
+        """Update step"""
+        with self._file_lock:
+            if int(step.stepId) <= len(self.steps):
+                self.steps[int(step.stepId) - 1] = step
+            else:
+                self.steps.append(step)
+                self.traceMetadata.numberOfSteps = len(self.steps)
+            with open(f"{self.trace_path}/tasks.json", "w") as f:
+                json.dump(
+                    self.model_dump(
+                        mode="json",
+                        exclude={"_file_locks"},
+                        context={"actions_as_json": True},
+                    ),
+                    f,
+                    indent=2,
+                )
+
+
+#################### API Routes Models ########################
 
 
 class HealthResponse(BaseModel):
@@ -249,3 +296,22 @@ class ActiveTasksResponse(BaseModel):
 
     active_tasks: dict[str, ActiveTask]
     total_connections: int
+
+
+class UpdateStepRequest(BaseModel):
+    """Request model for updating a step"""
+
+    step_evaluation: Literal["like", "dislike", "neutral"]
+
+
+class UpdateStepResponse(BaseModel):
+    """Response model for step update"""
+
+    success: bool
+    message: str
+
+
+class AvailableModelsResponse(BaseModel):
+    """Response for available models"""
+
+    models: list[str]

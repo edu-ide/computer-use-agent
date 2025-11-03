@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 
 from cua2_core.services.agent_service import AgentService
+from cua2_core.services.sandbox_service import SandboxService
 from cua2_core.websocket.websocket_manager import WebSocketManager
 from dotenv import load_dotenv
 from fastapi import FastAPI
@@ -16,23 +17,23 @@ async def lifespan(app: FastAPI):
     # Startup: Initialize services
     print("Initializing services...")
 
-    # Initialize WebSocket manager
     websocket_manager = WebSocketManager()
 
-    # Initialize agent service with websocket manager dependency
-    agent_service = AgentService(websocket_manager)
+    sandbox_service = SandboxService()
+
+    agent_service = AgentService(websocket_manager, sandbox_service)
 
     # Store services in app state for access in routes
     app.state.websocket_manager = websocket_manager
+    app.state.sandbox_service = sandbox_service
     app.state.agent_service = agent_service
 
     print("Services initialized successfully")
 
     yield
 
-    # Shutdown: Clean up resources
     print("Shutting down services...")
-    # Add any cleanup logic here if needed
+    await sandbox_service.cleanup_sandboxes()
     print("Services shut down successfully")
 
 

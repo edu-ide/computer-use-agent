@@ -1,16 +1,14 @@
-import React from 'react';
+import { Header, Metadata, StackSteps, VNCStream } from '@/components/mock';
 import { useWebSocket } from '@/hooks/useWebSocket';
-import { WebSocketEvent } from '@/types/agent';
+import { AgentStep, AgentTrace, WebSocketEvent } from '@/types/agent';
 import { useState } from 'react';
-import { AgentTrace, AgentStep } from '@/types/agent';
 import { ulid } from 'ulid';
-import { Header, VNCStream, Metadata, StackSteps } from '@/components/mock';
 
 const Index = () => {
   const [trace, setTrace] = useState<AgentTrace>();
   const [isAgentProcessing, setIsAgentProcessing] = useState(false);
   const [vncUrl, setVncUrl] = useState<string>('');
-  const [selectedModelId, setSelectedModelId] = useState<string>("claude-sonnet-4-5-20250929");
+  const [selectedModelId, setSelectedModelId] = useState<string>("Qwen/Qwen3-VL-30B-A3B-Instruct");
 
   // #################### WebSocket Connection ########################
 
@@ -51,12 +49,12 @@ const Index = () => {
         setIsAgentProcessing(false);
         setTrace(trace => {
           return trace.id === event.traceMetadata.traceId
-              ? {
-                ...trace,
-                isRunning: false,
-                metadata: event.traceMetadata,
-              }
-              : trace;
+            ? {
+              ...trace,
+              isRunning: false,
+              metadata: event.traceMetadata,
+            }
+            : trace;
         });
         console.log('Agent complete received:', event.traceMetadata);
         break;

@@ -23,6 +23,14 @@ dev-frontend:
 
 pre-commit:
 	uv run pre-commit run --all-files --show-diff-on-failure
+	make test
+
+# Run tests
+test:
+	cd cua2-core && uv run pytest tests/ -v
+
+test-coverage:
+	cd cua2-core && uv run pytest tests/ -v --cov=cua2_core --cov-report=html --cov-report=term
 
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true

@@ -1,39 +1,45 @@
 import asyncio
 import base64
 import json
-from pathlib import Path
-from typing import Optional
+import logging
+import os
+import time
+from io import BytesIO
+from typing import Callable, Literal
 
 from cua2_core.models.models import (
     ActiveTask,
     AgentAction,
-    AgentCompleteEvent,
-    AgentErrorEvent,
-    AgentProgressEvent,
-    AgentStartEvent,
     AgentStep,
     AgentTrace,
     AgentTraceMetadata,
-    VncUrlSetEvent,
-    VncUrlUnsetEvent,
 )
-from cua2_core.websocket.websocket_manager import WebSocketManager
+from cua2_core.services.agent_utils.desktop_agent import E2BVisionAgent
+from cua2_core.services.agent_utils.function_parser import parse_function_call
+from cua2_core.services.agent_utils.get_model import get_model
+from cua2_core.services.sandbox_service import SandboxService
+from cua2_core.websocket.websocket_manager import WebSocketException, WebSocketManager
+from e2b_desktop import Sandbox
+from fastapi import WebSocket
+from PIL import Image
+from smolagents import ActionStep, AgentImage, AgentMaxStepsError, TaskStep
+
+logger = logging.getLogger(__name__)
 
 
 class AgentService:
     """Service for handling agent tasks and processing"""
 
-    def __init__(self, websocket_manager):
+    def __init__(
+        self, websocket_manager: WebSocketManager, sandbox_service: SandboxService
+    ):
         self.active_tasks: dict[str, ActiveTask] = {}
         self.websocket_manager: WebSocketManager = websocket_manager
-        self.simulation_data_path = (
-            Path(__file__).parent / "simulation_metadata" / "simulated_trace.json"
-        )
-        self.simulation_images_path = (
-            Path(__file__).parent / "simulation_metadata" / "images"
-        )
+        self.task_websockets: dict[str, WebSocket] = {}
+        self.sandbox_service: SandboxService = sandbox_service
+        self.last_screenshot: dict[str, AgentImage] = {}
 
-    async def process_user_task(self, trace: AgentTrace) -> str:
+    async def process_user_task(self, trace: AgentTrace, websocket: WebSocket) -> str:
         """Process a user task and return the trace ID"""
 
         trace_id = trace.id
@@ -44,123 +50,326 @@ class AgentService:
         self.active_tasks[trace_id] = ActiveTask(
             message_id=trace_id,
             instruction=trace.instruction,
-            modelId=trace.modelId,
+            model_id=trace.modelId,
             timestamp=trace.timestamp,
             steps=trace.steps,
             traceMetadata=trace.traceMetadata,
         )
 
-        # Start the agent processing in the background
-        asyncio.create_task(self._simulate_agent_processing(trace))
+        # Store the websocket for this task
+        self.task_websockets[trace_id] = websocket
+
+        asyncio.create_task(self._agent_processing(trace_id))
 
         return trace_id
 
-    async def _simulate_agent_processing(self, trace: AgentTrace):
-        """Simulate agent processing using simulated_trace.json data"""
-        trace_id = trace.id
+    async def _agent_runner(
+        self,
+        message_id: str,
+        step_callback: Callable[[ActionStep, E2BVisionAgent], None],
+    ):
+        """Run the task with the appropriate agent"""
+
+        sandbox: Sandbox | None = None
+        agent = None
+        novnc_active = False
+        websocket_exception = False
 
         try:
-            # Load simulation data
-            with open(self.simulation_data_path, "r") as f:
-                simulation_data = json.load(f)
+            # Get the websocket for this task
+            websocket = self.task_websockets.get(message_id)
 
-            # Send agent start event with the initial trace
-            start_event = AgentStartEvent(type="agent_start", agentTrace=trace)
-            await self.websocket_manager.broadcast(start_event)
+            await self.websocket_manager.send_agent_start(
+                active_task=self.active_tasks[message_id], websocket=websocket
+            )
 
-            # mock VNC URL
-            vnc_url = "https://www.youtube.com/embed/VCutEsRSJ5A?si=PT0ETJ7zIJ9ywhGW"
-            vnc_set_event = VncUrlSetEvent(type="vnc_url_set", vncUrl=vnc_url)
-            await self.websocket_manager.broadcast(vnc_set_event)
+            model = get_model(self.active_tasks[message_id].model_id)
 
-            trace_metadata = AgentTraceMetadata(traceId=trace_id, maxSteps=20)
+            # Acquire a sandbox from the pool
+            sandbox = await self.sandbox_service.acquire_sandbox(message_id)
+            if sandbox is None:
+                raise Exception("No sandbox available: pool limit reached")
 
-            # Process each step from the simulation data
-            for step_data in simulation_data["steps"]:
-                # Wait before sending the next step to simulate processing time
-                await asyncio.sleep(step_data["duration"])
+            data_dir = self.active_tasks[message_id].trace_path
+            user_content = self.active_tasks[message_id].instruction
 
-                # Load and encode the image
-                image_path = (
-                    self.simulation_images_path / step_data["image"].split("/")[-1]
+            agent = E2BVisionAgent(
+                model=model,
+                data_dir=data_dir,
+                desktop=sandbox,
+                step_callbacks=[step_callback],
+            )
+
+            self.active_tasks[message_id].traceMetadata.maxSteps = agent.max_steps
+
+            await self.websocket_manager.send_vnc_url_set(
+                vnc_url=sandbox.stream.get_url(
+                    auto_connect=True,
+                    view_only=True,
+                    resize="scale",
+                    auth_key=sandbox.stream.get_auth_key(),
                 )
-                with open(image_path, "rb") as img_file:
-                    image_bytes = img_file.read()
-                    image_base64 = f"data:image/png;base64,{base64.b64encode(image_bytes).decode('utf-8')}"
+                or "",
+                websocket=websocket,
+            )
+            novnc_active = True
 
-                # Convert actions to AgentAction objects
-                actions = [
-                    AgentAction(
-                        actionType=action["actionType"],
-                        actionArguments=action["actionArguments"],
-                    )
-                    for action in step_data["actions"]
-                ]
+            step_filename = f"{message_id}-1"
+            screenshot_bytes = agent.desktop.screenshot()
+            image = Image.open(BytesIO(screenshot_bytes))
+            screenshot_path = os.path.join(agent.data_dir, f"{step_filename}.png")
+            image.save(screenshot_path)
 
-                # Create agent step
-                agent_step = AgentStep(
-                    traceId=trace_id,
-                    stepId=step_data["stepId"],
-                    image=image_base64,
-                    thought=step_data["thought"],
-                    actions=actions,
-                    error="",
-                    duration=step_data["duration"],
-                    inputTokensUsed=step_data["inputTokensUsed"],
-                    outputTokensUsed=step_data["outputTokensUsed"],
-                    step_evaluation=step_data["step_evaluation"],
-                )
+            self.last_screenshot[message_id] = image
 
-                trace_metadata.numberOfSteps += 1
-                trace_metadata.duration += step_data["duration"]
-                trace_metadata.inputTokensUsed += step_data["inputTokensUsed"]
-                trace_metadata.outputTokensUsed += step_data["outputTokensUsed"]
+            await asyncio.to_thread(
+                agent.run,
+                user_content,
+            )
 
-                # Send progress event
-                progress_event = AgentProgressEvent(
-                    type="agent_progress",
-                    agentStep=agent_step,
-                    traceMetadata=trace_metadata,
-                )
-                await self.websocket_manager.broadcast(progress_event)
+            self.active_tasks[message_id].traceMetadata.completed = True
 
-                # Update active task
-                self.active_tasks[trace_id].steps.append(agent_step)
+        except WebSocketException:
+            websocket_exception = True
+            pass
 
-            # Unset VNC URL before completion
-            vnc_unset_event = VncUrlUnsetEvent(type="vnc_url_unset")
-            await self.websocket_manager.broadcast(vnc_unset_event)
+        except (Exception, KeyboardInterrupt):
+            import traceback
 
+            logger.error(
+                f"Error processing task: {traceback.format_exc()}", exc_info=True
+            )
+            await self.websocket_manager.send_agent_error(
+                error="Error processing task", websocket=websocket
+            )
+
+        finally:
             # Send completion event
-            complete_event = AgentCompleteEvent(
-                type="agent_complete", traceMetadata=trace_metadata
-            )
-            await self.websocket_manager.broadcast(complete_event)
+            if not websocket_exception:
+                await self.websocket_manager.send_agent_complete(
+                    metadata=self.active_tasks[message_id].traceMetadata,
+                    websocket=websocket,
+                )
 
-            # Update active task with final metadata
-            self.active_tasks[trace_id].traceMetadata = trace_metadata
+                if novnc_active:
+                    await self.websocket_manager.send_vnc_url_unset(websocket=websocket)
 
-            # Clean up after a delay
-            await asyncio.sleep(1)
-            if trace_id in self.active_tasks:
-                del self.active_tasks[trace_id]
-
-        except Exception as e:
-            print(f"Error in agent simulation: {str(e)}")
-            # Send error event
-            error_event = AgentErrorEvent(
-                type="agent_error", error=f"Error processing task: {str(e)}"
-            )
-            await self.websocket_manager.broadcast(error_event)
+            novnc_active = False
 
             # Clean up
-            if trace_id in self.active_tasks:
-                del self.active_tasks[trace_id]
+            if message_id in self.active_tasks:
+                self.active_tasks[message_id].store_model()
+                del self.active_tasks[message_id]
 
-    def get_active_tasks(self) -> dict:
-        """Get currently active tasks"""
-        return self.active_tasks.copy()
+            # Clean up websocket reference
+            if message_id in self.task_websockets:
+                del self.task_websockets[message_id]
 
-    def get_task_status(self, message_id: str) -> Optional[dict]:
-        """Get status of a specific task"""
-        return self.active_tasks.get(message_id)
+            if message_id in self.last_screenshot:
+                del self.last_screenshot[message_id]
+
+            # Release sandbox back to the pool
+            if sandbox:
+                await self.sandbox_service.release_sandbox(sandbox)
+
+    async def _agent_processing(
+        self,
+        message_id: str,
+    ):
+        """Process the user task with the appropriate agent"""
+
+        # Set up log file for this task
+        active_task = self.active_tasks[message_id]
+
+        # Ensure the directory exists
+        os.makedirs(active_task.trace_path, exist_ok=True)
+
+        # Capture the event loop reference in the async context
+        # This will be used in the callback to safely schedule coroutines from the worker thread
+        loop = asyncio.get_running_loop()
+
+        def step_callback(memory_step: ActionStep, agent: E2BVisionAgent):
+            assert memory_step.step_number is not None
+
+            time.sleep(3)
+
+            if message_id in self.last_screenshot:
+                memory_step.observations_images = [
+                    self.last_screenshot[message_id].copy()
+                ]
+            else:
+                image = self.last_screenshot[message_id]
+                # agent.last_marked_screenshot = AgentImage(screenshot_path)
+
+                for previous_memory_step in (
+                    agent.memory.steps
+                ):  # Remove previous screenshots from logs for lean processing
+                    if (
+                        isinstance(previous_memory_step, ActionStep)
+                        and previous_memory_step.step_number is not None
+                        and previous_memory_step.step_number
+                        <= memory_step.step_number - 1
+                    ):
+                        previous_memory_step.observations_images = None
+                    elif isinstance(previous_memory_step, TaskStep):
+                        previous_memory_step.task_images = None
+
+                memory_step.observations_images = [image.copy()]
+
+            model_output = (
+                memory_step.model_output_message.content
+                if memory_step.model_output_message
+                else None
+            )
+            if model_output is None and isinstance(
+                memory_step.error, AgentMaxStepsError
+            ):
+                model_output = memory_step.action_output
+
+            thought = (
+                model_output.split("```")[0].replace("\nAction:\n", "")
+                if model_output
+                and (
+                    memory_step.error is None
+                    or isinstance(memory_step.error, AgentMaxStepsError)
+                )
+                else None
+            )
+            action_sequence = (
+                model_output.split("```")[1]
+                if model_output and memory_step.error is None
+                else None
+            )
+            if memory_step.observations_images:
+                image = memory_step.observations_images[0]
+                buffered = BytesIO()
+                image.save(buffered, format="PNG")
+                image_base64 = f"data:image/png;base64,{base64.b64encode(buffered.getvalue()).decode('utf-8')}"
+                del buffered
+                del image
+            else:
+                image_base64 = None
+
+            step = AgentStep(
+                traceId=message_id,
+                stepId=str(memory_step.step_number),
+                image=image_base64,
+                thought=thought,
+                actions=AgentAction.from_function_calls(
+                    parse_function_call(action_sequence)
+                )
+                if action_sequence
+                else None,
+                error=memory_step.error.message if memory_step.error else None,
+                duration=memory_step.timing.duration,
+                inputTokensUsed=memory_step.token_usage.input_tokens,
+                outputTokensUsed=memory_step.token_usage.output_tokens,
+                step_evaluation="neutral",
+            )
+            self.active_tasks[
+                message_id
+            ].traceMetadata.inputTokensUsed += memory_step.token_usage.input_tokens
+            self.active_tasks[
+                message_id
+            ].traceMetadata.outputTokensUsed += memory_step.token_usage.output_tokens
+            self.active_tasks[message_id].traceMetadata.numberOfSteps += 1
+            self.active_tasks[
+                message_id
+            ].traceMetadata.duration += memory_step.timing.duration
+
+            # Add step to active task
+            self.active_tasks[message_id].update_step(step)
+
+            websocket = self.task_websockets.get(message_id)
+            future = asyncio.run_coroutine_threadsafe(
+                self.websocket_manager.send_agent_progress(
+                    step=step,
+                    metadata=self.active_tasks[message_id].traceMetadata,
+                    websocket=websocket,
+                ),
+                loop,
+            )
+            future.result()
+
+            step_filename = f"{message_id}-{memory_step.step_number}"
+            screenshot_bytes = agent.desktop.screenshot()
+            image = Image.open(BytesIO(screenshot_bytes))
+            screenshot_path = os.path.join(agent.data_dir, f"{step_filename}.png")
+            image.save(screenshot_path)
+            del self.last_screenshot[message_id]
+            self.last_screenshot[message_id] = image
+
+        await self._agent_runner(message_id, step_callback)
+
+    def update_trace_step(
+        self,
+        trace_id: str,
+        step_id: str,
+        step_evaluation: Literal["like", "dislike", "neutral"],
+    ):
+        """
+        Update a specific step in a trace (e.g., update step evaluation)
+
+        Args:
+            trace_id: The trace ID
+            step_id: The step ID (1-indexed)
+            step_evaluation: The evaluation value to set
+
+        Returns:
+            The updated AgentStep
+
+        Raises:
+            ValueError: If step_id is invalid or step not found
+            FileNotFoundError: If trace not found
+        """
+        # Try to find in active tasks first
+        active_task = self.active_tasks.get(trace_id)
+
+        if active_task:
+            # Task is still active
+            try:
+                step_index = int(step_id) - 1
+                if 0 <= step_index < len(active_task.steps):
+                    active_task.steps[step_index].step_evaluation = step_evaluation
+                    active_task.update_step(active_task.steps[step_index])
+                else:
+                    raise ValueError(f"Step {step_id} not found in trace")
+            except (ValueError, TypeError) as e:
+                raise ValueError(f"Invalid step_id format: {e}")
+        else:
+            # Task is not active, try to load from file
+            data_dir = "data"
+            trace_dirs = [
+                d for d in os.listdir(data_dir) if d.startswith(f"trace-{trace_id}")
+            ]
+
+            if not trace_dirs:
+                raise FileNotFoundError("Trace not found")
+
+            trace_path = os.path.join(data_dir, trace_dirs[0])
+            tasks_file = os.path.join(trace_path, "tasks.json")
+
+            if not os.path.exists(tasks_file):
+                raise FileNotFoundError("Trace data not found")
+
+            try:
+                # Load the trace data
+                with open(tasks_file, "r") as f:
+                    task_data = json.load(f)
+
+                # Find and update the step
+                step_index = int(step_id) - 1
+                if 0 <= step_index < len(task_data["steps"]):
+                    task_data["steps"][step_index]["step_evaluation"] = step_evaluation
+
+                    # Save the updated data
+                    with open(tasks_file, "w") as f:
+                        json.dump(task_data, f, indent=2)
+
+                    # Convert to AgentStep for response
+                    updated_step = AgentStep(**task_data["steps"][step_index])
+                    return updated_step
+                else:
+                    raise ValueError(f"Step {step_id} not found in trace")
+            except (ValueError, KeyError, TypeError) as e:
+                raise ValueError(f"Error processing step update: {e}")

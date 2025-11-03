@@ -12,8 +12,8 @@ export const TaskButton: React.FC<TaskButtonProps> = ({ isAgentProcessing, isCon
       onClick={() => {
         if (!isAgentProcessing && isConnected) {
           onSendTask(
-            "Complete the online form by clicking through the required fields",
-            "anthropic/claude-sonnet-4-5-20250929"
+            "Find the price of a NVIDIA RTX 4090 GPU",
+            "Qwen/Qwen3-VL-30B-A3B-Instruct"
           );
         }
       }}
@@ -56,7 +56,7 @@ export const TaskButton: React.FC<TaskButtonProps> = ({ isAgentProcessing, isCon
             )}
           </div>
           <p style={{ fontSize: '15px', fontWeight: 500, color: '#1f2937' }}>
-            Complete the online form by clicking through the required fields
+            Find the price of a NVIDIA RTX 4090 GPU
           </p>
         </div>
         <div style={{
@@ -67,7 +67,7 @@ export const TaskButton: React.FC<TaskButtonProps> = ({ isAgentProcessing, isCon
         }}>
           <span style={{ fontSize: '11px', fontWeight: 600, color: 'rgba(0, 0, 0, 0.6)', textTransform: 'uppercase', letterSpacing: '1px' }}>Model</span>
           <p style={{ fontSize: '12px', fontWeight: 600, color: '#1f2937', marginTop: '2px', whiteSpace: 'nowrap' }}>
-            claude-sonnet-4-5-20250929
+            Qwen/Qwen3-VL-30B-A3B-Instruct
           </p>
         </div>
       </div>

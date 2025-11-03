@@ -2,11 +2,13 @@ from datetime import datetime
 
 # Get services from app state
 from cua2_core.models.models import (
-    ActiveTasksResponse,
+    AvailableModelsResponse,
     HealthResponse,
-    TaskStatusResponse,
+    UpdateStepRequest,
+    UpdateStepResponse,
 )
 from cua2_core.services.agent_service import AgentService
+from cua2_core.services.agent_utils.get_model import AVAILABLE_MODELS
 from cua2_core.websocket.websocket_manager import WebSocketManager
 from fastapi import APIRouter, Depends, HTTPException, Request
 
@@ -36,24 +38,31 @@ async def health_check(
     )
 
 
-@router.get("/tasks", response_model=ActiveTasksResponse)
-async def get_active_tasks(
+@router.get("/models", response_model=AvailableModelsResponse)
+async def get_available_models():
+    """Get list of all available model IDs"""
+    return AvailableModelsResponse(models=AVAILABLE_MODELS)
+
+
+@router.patch("/traces/{trace_id}/steps/{step_id}", response_model=UpdateStepResponse)
+async def update_trace_step(
+    trace_id: str,
+    step_id: str,
+    request: UpdateStepRequest,
     agent_service: AgentService = Depends(get_agent_service),
-    websocket_manager: WebSocketManager = Depends(get_websocket_manager),
 ):
-    """Get currently active tasks"""
-    return ActiveTasksResponse(
-        active_tasks=agent_service.get_active_tasks(),
-        total_connections=websocket_manager.get_connection_count(),
-    )
-
-
-@router.get("/tasks/{task_id}", response_model=TaskStatusResponse)
-async def get_task_status(
-    task_id: str, agent_service: AgentService = Depends(get_agent_service)
-):
-    """Get status of a specific task"""
-    task_status = agent_service.get_task_status(task_id)
-    if task_status is None:
-        raise HTTPException(status_code=404, detail="Task not found")
-    return TaskStatusResponse(task_id=task_id, status=task_status)
+    """Update a specific step in a trace (e.g., update step evaluation)"""
+    try:
+        agent_service.update_trace_step(
+            trace_id=trace_id,
+            step_id=step_id,
+            step_evaluation=request.step_evaluation,
+        )
+        return UpdateStepResponse(
+            success=True,
+            message="Step updated successfully",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))

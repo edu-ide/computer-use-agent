@@ -3,6 +3,8 @@ import json
 # Get services from app state
 from cua2_core.app import app
 from cua2_core.models.models import AgentTrace, HeartbeatEvent
+from cua2_core.services.agent_service import AgentService
+from cua2_core.websocket.websocket_manager import WebSocketManager
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 # Create router
@@ -13,15 +15,15 @@ router = APIRouter()
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for real-time communication"""
 
-    websocket_manager = app.state.websocket_manager
-    agent_service = app.state.agent_service
+    websocket_manager: WebSocketManager = app.state.websocket_manager
+    agent_service: AgentService = app.state.agent_service
 
     await websocket_manager.connect(websocket)
 
     try:
         # Send welcome heartbeat
         welcome_message = HeartbeatEvent(type="heartbeat")
-        await websocket_manager.send_personal_message(welcome_message, websocket)
+        await websocket_manager.send_message(welcome_message, websocket)
 
         # Keep the connection alive and wait for messages
         while True:
@@ -50,7 +52,9 @@ async def websocket_endpoint(websocket: WebSocket):
                             trace = AgentTrace(**trace_data)
 
                             # Process the user task with the trace
-                            trace_id = await agent_service.process_user_task(trace)
+                            trace_id = await agent_service.process_user_task(
+                                trace, websocket
+                            )
                             print(f"Started processing trace: {trace_id}")
                         else:
                             print("No trace data in message")
@@ -62,9 +66,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     error_response = AgentErrorEvent(
                         type="agent_error", error="Invalid JSON format"
                     )
-                    await websocket_manager.send_personal_message(
-                        error_response, websocket
-                    )
+                    await websocket_manager.send_message(error_response, websocket)
 
                 except Exception as e:
                     print(f"Error processing message: {e}")
@@ -76,9 +78,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     error_response = AgentErrorEvent(
                         type="agent_error", error=f"Error processing message: {str(e)}"
                     )
-                    await websocket_manager.send_personal_message(
-                        error_response, websocket
-                    )
+                    await websocket_manager.send_message(error_response, websocket)
 
             except Exception as e:
                 print(f"Error receiving WebSocket message: {e}")

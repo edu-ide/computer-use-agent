@@ -82,3 +82,18 @@ export interface UserTaskMessage {
   type: 'user_task';
   trace: AgentTrace;
 }
+
+// #################### API Routes Types ########################
+
+export interface AvailableModelsResponse {
+  models: string[];
+}
+
+export interface UpdateStepRequest {
+  step_evaluation: 'like' | 'dislike' | 'neutral';
+}
+
+export interface UpdateStepResponse {
+  success: boolean;
+  message: string;
+}
