@@ -3,12 +3,15 @@ from datetime import datetime
 # Get services from app state
 from cua2_core.models.models import (
     AvailableModelsResponse,
+    GenerateInstructionRequest,
+    GenerateInstructionResponse,
     HealthResponse,
     UpdateStepRequest,
     UpdateStepResponse,
 )
 from cua2_core.services.agent_service import AgentService
 from cua2_core.services.agent_utils.get_model import AVAILABLE_MODELS
+from cua2_core.services.instruction_service import InstructionService
 from cua2_core.websocket.websocket_manager import WebSocketManager
 from fastapi import APIRouter, Depends, HTTPException, Request
 
@@ -44,6 +47,30 @@ async def get_available_models():
     return AvailableModelsResponse(models=AVAILABLE_MODELS)
 
 
+@router.post("/generate-instruction", response_model=GenerateInstructionResponse)
+async def generate_task_instruction(
+    request: GenerateInstructionRequest,
+):
+    """Generate a task instruction using a specified model"""
+    try:
+        instruction = InstructionService.generate_instruction(
+            model_id=request.model_id, prompt=request.prompt
+        )
+
+        return GenerateInstructionResponse(
+            instruction=instruction, model_id=request.model_id
+        )
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error generating instruction: {str(e)}",
+        )
+
+
 @router.patch("/traces/{trace_id}/steps/{step_id}", response_model=UpdateStepResponse)
 async def update_trace_step(
     trace_id: str,
@@ -62,7 +89,7 @@ async def update_trace_step(
             success=True,
             message="Step updated successfully",
         )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))

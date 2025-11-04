@@ -206,12 +206,8 @@ class E2BVisionAgent(CodeAgent):
             Args:
                 url: The URL to open
             """
-            # Make sure URL has http/https prefix
-            if not url.startswith(("http://", "https://")):
-                url = "https://" + url
-
             self.desktop.open(url)
-            # Give it time to load
+
             time.sleep(2)
             self.logger.log(f"Opening URL: {url}")
             return f"Opened URL: {url}"

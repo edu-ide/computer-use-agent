@@ -97,3 +97,13 @@ export interface UpdateStepResponse {
   success: boolean;
   message: string;
 }
+
+export interface GenerateInstructionRequest {
+  model_id: string;
+  prompt?: string;
+}
+
+export interface GenerateInstructionResponse {
+  instruction: string;
+  model_id: string;
+}
