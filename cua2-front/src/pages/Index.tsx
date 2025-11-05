@@ -1,4 +1,5 @@
 import { Header, Metadata, StackSteps, VNCStream } from '@/components/mock';
+import { getWebSocketUrl } from '@/config/api';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { AgentStep, AgentTrace, WebSocketEvent } from '@/types/agent';
 import { useState } from 'react';
@@ -12,9 +13,8 @@ const Index = () => {
 
   // #################### WebSocket Connection ########################
 
-  // WebSocket connection - Use environment variable
-  // const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws';
-  const WS_URL = 'ws://localhost:8000/ws';
+  // WebSocket connection - Automatically configured based on environment
+  const WS_URL = getWebSocketUrl();
 
   const handleWebSocketMessage = (event: WebSocketEvent) => {
     console.log('WebSocket event received:', event);
