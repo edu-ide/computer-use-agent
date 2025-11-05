@@ -1,19 +1,20 @@
+import { CssBaseline, ThemeProvider } from '@mui/material';
 import { useMemo } from 'react';
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import { ThemeProvider, CssBaseline } from '@mui/material';
-import getTheme from './theme';
-import Welcome from "./pages/Welcome";
-import Task from "./pages/Task";
-import { useAgentStore, selectIsDarkMode } from './stores/agentStore';
+import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { getWebSocketUrl } from './config/api';
 import { useAgentWebSocket } from './hooks/useAgentWebSocket';
-import { config } from './config';
+import Task from "./pages/Task";
+import Welcome from "./pages/Welcome";
+import { selectIsDarkMode, useAgentStore } from './stores/agentStore';
+import getTheme from './theme';
 
 const App = () => {
   const isDarkMode = useAgentStore(selectIsDarkMode);
   const theme = useMemo(() => getTheme(isDarkMode ? 'dark' : 'light'), [isDarkMode]);
 
   // Initialize WebSocket connection at app level so it persists across route changes
-  useAgentWebSocket({ url: config.wsUrl });
+
+  useAgentWebSocket({ url: getWebSocketUrl() });
 
   return (
     <ThemeProvider theme={theme}>

@@ -1,10 +1,10 @@
-import { config } from '@/config';
+import { getApiBaseUrl } from '@/config/api';
 
 /**
  * Fetch available models from the backend
  */
 export async function fetchAvailableModels(): Promise<string[]> {
-  const response = await fetch(`${config.apiBaseUrl}/models`);
+  const response = await fetch(`${getApiBaseUrl()}/models`);
   if (!response.ok) {
     throw new Error('Failed to fetch models');
   }
@@ -16,7 +16,7 @@ export async function fetchAvailableModels(): Promise<string[]> {
  * Generate a random instruction from the backend
  */
 export async function generateRandomQuestion(modelId: string): Promise<string> {
-  const response = await fetch(`${config.apiBaseUrl}/generate-instruction`, {
+  const response = await fetch(`${getApiBaseUrl()}/generate-instruction`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -40,7 +40,7 @@ export async function updateStepEvaluation(
   stepId: string,
   evaluation: 'like' | 'dislike' | 'neutral'
 ): Promise<void> {
-  const response = await fetch(`${config.apiBaseUrl}/traces/${traceId}/steps/${stepId}`, {
+  const response = await fetch(`${getApiBaseUrl()}/traces/${traceId}/steps/${stepId}`, {
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',

@@ -6,7 +6,7 @@ from cua2_core.routes.routes import router
 from cua2_core.routes.websocket import router as websocket_router
 
 # Include routes
-app.include_router(router, prefix="/api/v1")
+app.include_router(router, prefix="/api")
 app.include_router(websocket_router)
 
 
