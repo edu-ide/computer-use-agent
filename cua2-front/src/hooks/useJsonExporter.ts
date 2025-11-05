@@ -13,7 +13,7 @@ interface UseJsonExporterReturn {
 }
 
 /**
- * Hook personnalisé pour exporter et télécharger une trace en JSON
+ * Custom hook to export and download a trace as JSON
  */
 export const useJsonExporter = ({
   trace,

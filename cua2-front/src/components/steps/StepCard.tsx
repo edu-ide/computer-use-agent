@@ -30,11 +30,11 @@ export const StepCard: React.FC<StepCardProps> = ({ step, index, isLatest = fals
   };
 
   const handleAccordionClick = (event: React.MouseEvent) => {
-    event.stopPropagation(); // Empêcher la propagation pour ne pas sélectionner la step
+    event.stopPropagation(); // Prevent propagation to avoid selecting the step
   };
 
   const handleVote = async (event: React.MouseEvent, vote: 'like' | 'dislike') => {
-    event.stopPropagation(); // Empêcher la propagation pour ne pas sélectionner la step
+    event.stopPropagation(); // Prevent propagation to avoid selecting the step
 
     if (isVoting) return;
 

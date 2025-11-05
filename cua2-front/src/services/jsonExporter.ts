@@ -31,7 +31,7 @@ export const exportTraceToJson = (
       inputTokensUsed: step.inputTokensUsed,
       outputTokensUsed: step.outputTokensUsed,
       step_evaluation: step.step_evaluation,
-      // Ne pas inclure l'image base64 pour réduire la taille du JSON
+      // Don't include base64 image to reduce JSON size
       hasImage: !!step.image,
     })),
     exportedAt: new Date().toISOString(),
@@ -41,9 +41,9 @@ export const exportTraceToJson = (
 };
 
 /**
- * Télécharge un JSON avec un nom de fichier
- * @param jsonString String JSON à télécharger
- * @param filename Nom du fichier à télécharger
+ * Download a JSON with a filename
+ * @param jsonString JSON string to download
+ * @param filename Filename to download
  */
 export const downloadJson = (jsonString: string, filename: string = 'trace.json') => {
   const blob = new Blob([jsonString], { type: 'application/json' });

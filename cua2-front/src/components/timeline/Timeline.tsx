@@ -131,7 +131,7 @@ export const Timeline: React.FC<TimelineProps> = ({ metadata, isRunning }) => {
               content: '""',
               position: 'absolute',
               left: "15px",
-              // Calculer la largeur pour couvrir tous les steps (200 steps * (40px minWidth + 12px gap))
+              // Calculate width to cover all steps (200 steps * (40px minWidth + 12px gap))
               width: `calc(${metadata.maxSteps} * (40px + 12px))`,
               top: '17.5px',
               transform: 'translateY(-50%)',
@@ -157,7 +157,7 @@ export const Timeline: React.FC<TimelineProps> = ({ metadata, isRunning }) => {
                 zIndex: 1,
               }}
             >
-              {/* Cercle blanc en arrière-plan pour cacher la ligne */}
+              {/* White circle background to hide the line */}
               <Box
                 sx={{
                   position: 'relative',
@@ -166,7 +166,7 @@ export const Timeline: React.FC<TimelineProps> = ({ metadata, isRunning }) => {
                   justifyContent: 'center',
                 }}
               >
-                {/* Fond blanc/background pour cacher la ligne */}
+                {/* White background to hide the line */}
                 <Box
                   sx={{
                     position: 'absolute',
@@ -239,7 +239,7 @@ export const Timeline: React.FC<TimelineProps> = ({ metadata, isRunning }) => {
                   } : {},
                 }}
               >
-                {/* Cercle blanc en arrière-plan pour cacher la ligne */}
+                {/* White circle background to hide the line */}
                 <Box
                   sx={{
                     position: 'relative',
@@ -248,7 +248,7 @@ export const Timeline: React.FC<TimelineProps> = ({ metadata, isRunning }) => {
                     justifyContent: 'center',
                   }}
                 >
-                  {/* Fond blanc/background pour cacher la ligne */}
+                  {/* White background to hide the line */}
                   <Box
                     sx={{
                       position: 'absolute',
@@ -338,7 +338,7 @@ export const Timeline: React.FC<TimelineProps> = ({ metadata, isRunning }) => {
                 },
               }}
             >
-              {/* Cercle blanc en arrière-plan pour cacher la ligne */}
+              {/* White circle background to hide the line */}
               <Box
                 sx={{
                   position: 'relative',
@@ -347,7 +347,7 @@ export const Timeline: React.FC<TimelineProps> = ({ metadata, isRunning }) => {
                   justifyContent: 'center',
                 }}
               >
-                {/* Fond blanc/background pour cacher la ligne */}
+                {/* White background to hide the line */}
                 <Box
                   sx={{
                     position: 'absolute',

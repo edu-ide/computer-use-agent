@@ -3,7 +3,7 @@ import { Card, CardContent, Box, Typography, CircularProgress } from '@mui/mater
 import CableIcon from '@mui/icons-material/Cable';
 import { keyframes } from '@mui/system';
 
-// Animation de pulsation pour le border
+// Border pulse animation
 const borderPulse = keyframes`
   0%, 100% {
     border-color: rgba(79, 134, 198, 0.4);
@@ -15,7 +15,7 @@ const borderPulse = keyframes`
   }
 `;
 
-// Animation de pulsation pour le fond
+// Background pulse animation
 const backgroundPulse = keyframes`
   0%, 100% {
     background-color: rgba(79, 134, 198, 0.03);
@@ -54,7 +54,7 @@ export const ConnectionStepCard: React.FC<ConnectionStepCardProps> = ({ isConnec
       }}
     >
       <CardContent sx={{ p: 1.5, '&:last-child': { pb: 1.5 }, position: 'relative', zIndex: 1 }}>
-        {/* Header avec spinner ou check */}
+        {/* Header with spinner or check */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
           <Box
             sx={{

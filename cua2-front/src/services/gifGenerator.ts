@@ -2,7 +2,7 @@ import gifshot from 'gifshot';
 
 export interface GifGenerationOptions {
   images: string[];
-  interval?: number; // Durée de chaque frame en secondes
+  interval?: number; // Duration of each frame in seconds
   gifWidth?: number;
   gifHeight?: number;
   quality?: number;
@@ -10,18 +10,18 @@ export interface GifGenerationOptions {
 
 export interface GifGenerationResult {
   success: boolean;
-  image?: string; // Data URL du GIF
+  image?: string; // GIF data URL
   error?: string;
 }
 
 /**
- * Ajoute un compteur d'étapes sur une image
- * @param imageSrc Source de l'image (base64 ou URL)
- * @param stepNumber Numéro de l'étape
- * @param totalSteps Nombre total d'étapes
- * @param width Largeur de l'image
- * @param height Hauteur de l'image
- * @returns Promesse résolue avec l'image modifiée en base64
+ * Add step counter to an image
+ * @param imageSrc Image source (base64 or URL)
+ * @param stepNumber Step number
+ * @param totalSteps Total number of steps
+ * @param width Image width
+ * @param height Image height
+ * @returns Promise resolved with modified image in base64
  */
 const addStepCounter = async (
   imageSrc: string,
@@ -45,10 +45,10 @@ const addStepCounter = async (
         return;
       }
 
-      // Dessiner l'image
+      // Draw the image
       ctx.drawImage(img, 0, 0, width, height);
 
-      // Configurer le style du compteur
+      // Configure counter style
       const fontSize = Math.max(12, Math.floor(height * 0.08));
       const padding = Math.max(6, Math.floor(height * 0.03));
       const text = `${stepNumber}/${totalSteps}`;
@@ -58,11 +58,11 @@ const addStepCounter = async (
       const textWidth = textMetrics.width;
       const textHeight = fontSize;
 
-      // Position en bas à droite
+      // Position at bottom right
       const x = width - textWidth - padding * 2;
       const y = height - padding * 2;
 
-      // Dessiner un rectangle semi-transparent pour la lisibilité
+      // Draw semi-transparent rectangle for readability
       ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
       ctx.fillRect(
         x - padding,
@@ -71,12 +71,12 @@ const addStepCounter = async (
         textHeight + padding * 2
       );
 
-      // Dessiner le texte en noir
+      // Draw black text
       ctx.fillStyle = '#000000';
       ctx.textBaseline = 'top';
       ctx.fillText(text, x, y - textHeight);
 
-      // Convertir le canvas en base64
+      // Convert canvas to base64
       resolve(canvas.toDataURL('image/png'));
     };
 
@@ -89,16 +89,16 @@ const addStepCounter = async (
 };
 
 /**
- * Génère un GIF à partir d'une liste d'images (base64 ou URLs)
- * @param options Options de génération du GIF
- * @returns Promesse résolue avec le résultat de la génération
+ * Generate a GIF from a list of images (base64 or URLs)
+ * @param options GIF generation options
+ * @returns Promise resolved with generation result
  */
 export const generateGif = async (
   options: GifGenerationOptions
 ): Promise<GifGenerationResult> => {
   const {
     images,
-    interval = 1.5, // 1.5 secondes par frame par défaut
+    interval = 1.5, // 1.5 seconds per frame by default
     gifWidth = 400,
     gifHeight = 200,
     quality = 10,
@@ -107,12 +107,12 @@ export const generateGif = async (
   if (!images || images.length === 0) {
     return {
       success: false,
-      error: 'Aucune image fournie pour générer le GIF',
+      error: 'No images provided to generate GIF',
     };
   }
 
   try {
-    // Ajouter le compteur sur chaque image
+    // Add counter to each image
     const imagesWithCounter = await Promise.all(
       images.map((img, index) =>
         addStepCounter(img, index + 1, images.length, gifWidth, gifHeight)
@@ -134,7 +134,7 @@ export const generateGif = async (
           if (obj.error) {
             resolve({
               success: false,
-              error: obj.errorMsg || 'Erreur lors de la génération du GIF',
+              error: obj.errorMsg || 'Error during GIF generation',
             });
           } else {
             resolve({
@@ -148,15 +148,15 @@ export const generateGif = async (
   } catch (error) {
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Erreur inconnue',
+      error: error instanceof Error ? error.message : 'Unknown error',
     };
   }
 };
 
 /**
- * Télécharge un GIF (data URL) avec un nom de fichier
- * @param dataUrl Data URL du GIF
- * @param filename Nom du fichier à télécharger
+ * Download a GIF (data URL) with a filename
+ * @param dataUrl GIF data URL
+ * @param filename Filename to download
  */
 export const downloadGif = (dataUrl: string, filename: string = 'trace-replay.gif') => {
   const link = document.createElement('a');

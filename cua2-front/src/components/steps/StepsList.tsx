@@ -59,13 +59,13 @@ export const StepsList: React.FC<StepsListProps> = ({ trace }) => {
   // - Remains visible during the entire agent processing
   // - Hides only when agent stops OR a finalStep exists
   useEffect(() => {
-    // Si le stream démarre vraiment (isAgentProcessing = true et PAS en train de se connecter)
-    // Et pas encore de startTime enregistré
+    // If stream really starts (isAgentProcessing = true and NOT connecting)
+    // And no startTime recorded yet
     if (isAgentProcessing && !isConnectingToE2B && !streamStartTimeRef.current) {
       streamStartTimeRef.current = Date.now();
     }
 
-    // Si l'agent s'arrête OU qu'on a un finalStep, reset et cacher
+    // If agent stops OR we have a finalStep, reset and hide
     if (!isAgentProcessing || finalStep) {
       streamStartTimeRef.current = null;
       setShowThinkingCard(false);
@@ -83,7 +83,7 @@ export const StepsList: React.FC<StepsListProps> = ({ trace }) => {
         clearTimeout(thinkingTimeoutRef.current);
       }
 
-      // Calculer le temps écoulé depuis le début du stream
+      // Calculate elapsed time since stream started
       const elapsedTime = Date.now() - streamStartTimeRef.current;
       const remainingTime = Math.max(0, 5000 - elapsedTime);
 
