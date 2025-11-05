@@ -1,14 +1,14 @@
-import React from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Box, Typography, CircularProgress, Button, keyframes } from '@mui/material';
-import MonitorIcon from '@mui/icons-material/Monitor';
-import ImageIcon from '@mui/icons-material/Image';
-import PlayArrowIcon from '@mui/icons-material/PlayArrow';
-import { AgentTraceMetadata, AgentStep } from '@/types/agent';
-import { useAgentStore, selectError, selectFinalStep, selectSteps, selectTrace } from '@/stores/agentStore';
-import { CompletionView } from './CompletionView';
 import { useGifGenerator } from '@/hooks/useGifGenerator';
 import { useJsonExporter } from '@/hooks/useJsonExporter';
+import { selectError, selectFinalStep, selectSteps, selectTrace, useAgentStore } from '@/stores/agentStore';
+import { AgentStep, AgentTraceMetadata } from '@/types/agent';
+import ImageIcon from '@mui/icons-material/Image';
+import MonitorIcon from '@mui/icons-material/Monitor';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import { Box, Button, CircularProgress, keyframes, Typography } from '@mui/material';
+import React from 'react';
+import { useNavigate } from 'react-router-dom';
+import { CompletionView } from './completionview/CompletionView';
 
 // Animation for live indicator
 const livePulse = keyframes`
