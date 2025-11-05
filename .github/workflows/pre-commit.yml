@@ -31,4 +31,4 @@ jobs:
 
       - name: Run pre-commit
         run: |
-          make pre-commit
+          uv run pre-commit run --all-files --show-diff-on-failure

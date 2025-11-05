@@ -1,4 +1,3 @@
-
 export interface AgentTrace {
   id: string;
   timestamp: Date;
@@ -6,16 +5,22 @@ export interface AgentTrace {
   modelId: string;
   isRunning: boolean;
   steps?: AgentStep[];
-  metadata?: AgentTraceMetadata;
+  traceMetadata?: AgentTraceMetadata;
+}
+
+export interface AgentAction {
+  function_name: string;
+  parameters: Record<string, unknown>;
+  description: string;
 }
 
 export interface AgentStep {
   traceId: string;
   stepId: string;
-  error: string;
+  error?: string | null;
   image: string;
-  thought: string;
-  actions: string[];
+  thought?: string | null;
+  actions?: AgentAction[] | null;
   duration: number;
   inputTokensUsed: number;
   outputTokensUsed: number;
@@ -28,6 +33,14 @@ export interface AgentTraceMetadata {
   outputTokensUsed: number;
   duration: number;
   numberOfSteps: number;
+  maxSteps: number;
+  completed: boolean;
+}
+
+export interface FinalStep {
+  type: 'success' | 'failure';
+  message?: string;
+  metadata: AgentTraceMetadata;
 }
 
 // #################### WebSocket Events Types - Server to Client ########################
@@ -81,29 +94,4 @@ export type WebSocketEvent =
 export interface UserTaskMessage {
   type: 'user_task';
   trace: AgentTrace;
-}
-
-// #################### API Routes Types ########################
-
-export interface AvailableModelsResponse {
-  models: string[];
-}
-
-export interface UpdateStepRequest {
-  step_evaluation: 'like' | 'dislike' | 'neutral';
-}
-
-export interface UpdateStepResponse {
-  success: boolean;
-  message: string;
-}
-
-export interface GenerateInstructionRequest {
-  model_id: string;
-  prompt?: string;
-}
-
-export interface GenerateInstructionResponse {
-  instruction: string;
-  model_id: string;
 }

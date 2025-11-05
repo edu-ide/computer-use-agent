@@ -1,4 +1,3 @@
-import os
 from contextlib import asynccontextmanager
 
 from cua2_core.services.agent_service import AgentService
@@ -17,9 +16,6 @@ async def lifespan(app: FastAPI):
     """Lifespan context manager for startup and shutdown events"""
     # Startup: Initialize services
     print("Initializing services...")
-
-    if not os.getenv("HF_TOKEN"):
-        raise ValueError("HF_TOKEN is not set")
 
     websocket_manager = WebSocketManager()
 

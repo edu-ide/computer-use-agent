@@ -1,0 +1,452 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { Box, Typography, Button, Container, Paper, TextField, IconButton, Select, MenuItem, FormControl, InputLabel, CircularProgress } from '@mui/material';
+import ShuffleIcon from '@mui/icons-material/Shuffle';
+import SendIcon from '@mui/icons-material/Send';
+import LightModeOutlined from '@mui/icons-material/LightModeOutlined';
+import DarkModeOutlined from '@mui/icons-material/DarkModeOutlined';
+import SmartToyIcon from '@mui/icons-material/SmartToy';
+import { useAgentStore, selectSelectedModelId, selectIsDarkMode, selectAvailableModels, selectIsLoadingModels } from '@/stores/agentStore';
+import { fetchAvailableModels, generateRandomQuestion } from '@/services/api';
+
+interface WelcomeScreenProps {
+  onStartTask: (instruction: string, modelId: string) => void;
+  isConnected: boolean;
+}
+
+export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStartTask, isConnected }) => {
+  const [customTask, setCustomTask] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
+  const [isGeneratingQuestion, setIsGeneratingQuestion] = useState(false);
+  const typingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  const isDarkMode = useAgentStore(selectIsDarkMode);
+  const toggleDarkMode = useAgentStore((state) => state.toggleDarkMode);
+  const selectedModelId = useAgentStore(selectSelectedModelId);
+  const setSelectedModelId = useAgentStore((state) => state.setSelectedModelId);
+  const availableModels = useAgentStore(selectAvailableModels);
+  const isLoadingModels = useAgentStore(selectIsLoadingModels);
+  const setAvailableModels = useAgentStore((state) => state.setAvailableModels);
+  const setIsLoadingModels = useAgentStore((state) => state.setIsLoadingModels);
+
+  // Load available models on mount
+  useEffect(() => {
+    const loadModels = async () => {
+      setIsLoadingModels(true);
+      try {
+        const models = await fetchAvailableModels();
+        setAvailableModels(models);
+
+        // Set first model as default if current selection is not in the list
+        if (models.length > 0 && !models.includes(selectedModelId)) {
+          setSelectedModelId(models[0]);
+        }
+      } catch (error) {
+        console.error('Failed to load models:', error);
+        // Fallback to empty array on error
+        setAvailableModels([]);
+      } finally {
+        setIsLoadingModels(false);
+      }
+    };
+
+    loadModels();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Clean up typing interval on unmount
+  useEffect(() => {
+    return () => {
+      if (typingIntervalRef.current) {
+        clearInterval(typingIntervalRef.current);
+      }
+    };
+  }, []);
+
+  const handleWriteRandomTask = async () => {
+    // Clear any existing typing interval
+    if (typingIntervalRef.current) {
+      clearInterval(typingIntervalRef.current);
+      typingIntervalRef.current = null;
+    }
+
+    setIsGeneratingQuestion(true);
+    try {
+      const randomTask = await generateRandomQuestion(selectedModelId);
+
+      // Clear current text
+      setCustomTask('');
+      setIsTyping(true);
+
+      // Type effect
+      let currentIndex = 0;
+      typingIntervalRef.current = setInterval(() => {
+        if (currentIndex < randomTask.length) {
+          setCustomTask(randomTask.substring(0, currentIndex + 1));
+          currentIndex++;
+        } else {
+          if (typingIntervalRef.current) {
+            clearInterval(typingIntervalRef.current);
+            typingIntervalRef.current = null;
+          }
+          setIsTyping(false);
+        }
+      }, 30); // 30ms per character
+    } catch (error) {
+      console.error('Failed to generate question:', error);
+      setIsTyping(false);
+    } finally {
+      setIsGeneratingQuestion(false);
+    }
+  };
+
+  const handleCustomTask = () => {
+    if (customTask.trim() && !isTyping) {
+      onStartTask(customTask.trim(), selectedModelId);
+    }
+  };
+
+  return (
+    <>
+      {/* Dark Mode Toggle - Top Right (Absolute to viewport) */}
+      <Box sx={{ position: 'absolute', top: 24, right: 24, zIndex: 1000 }}>
+        <IconButton
+          onClick={toggleDarkMode}
+          size="medium"
+          sx={{
+            color: 'text.primary',
+            backgroundColor: 'background.paper',
+            border: '1px solid',
+            borderColor: 'divider',
+            '&:hover': {
+              backgroundColor: 'action.hover',
+              borderColor: 'primary.main',
+            },
+          }}
+        >
+          {isDarkMode ? <LightModeOutlined /> : <DarkModeOutlined />}
+        </IconButton>
+      </Box>
+
+      <Container
+        maxWidth="md"
+        sx={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: '100vh',
+          textAlign: 'center',
+          py: 8,
+        }}
+      >
+        {/* Title */}
+        <Typography
+          variant="h2"
+          sx={{
+            fontWeight: 800,
+            mb: 1,
+            color: 'text.primary',
+          }}
+        >
+          CUA2 Agent
+        </Typography>
+
+        {/* Powered by smolagents */}
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1,
+            mb: 2,
+          }}
+        >
+          <Typography
+            variant="body2"
+            sx={{
+              color: 'text.secondary',
+              fontWeight: 500,
+            }}
+          >
+            Powered by
+          </Typography>
+          <Box
+            component="a"
+            href="https://github.com/huggingface/smolagents"
+            target="_blank"
+            rel="noopener noreferrer"
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 0.75,
+              textDecoration: 'none',
+              transition: 'all 0.2s ease',
+              '&:hover': {
+                '& .smolagents-text': {
+                  textDecoration: 'underline',
+                },
+              },
+            }}
+          >
+            {/* Hugging Face Official Logo */}
+            <Box
+              component="img"
+              src="https://huggingface.co/front/assets/huggingface_logo-noborder.svg"
+              alt="Hugging Face"
+              sx={{
+                width: 24,
+                height: 24,
+                flexShrink: 0,
+              }}
+            />
+
+            <Typography
+              className="smolagents-text"
+              sx={{
+                color: 'primary.main',
+                fontWeight: 700,
+                fontSize: '1rem',
+              }}
+            >
+              smolagents
+            </Typography>
+
+            {/* GitHub stars badge */}
+            <Box
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 0.5,
+                px: 1,
+                py: 0.25,
+                backgroundColor: (theme) =>
+                  theme.palette.mode === 'dark'
+                    ? 'rgba(144, 202, 249, 0.08)'
+                    : 'rgba(25, 118, 210, 0.08)',
+                borderRadius: 1,
+                border: '1px solid',
+                borderColor: 'primary.main',
+              }}
+            >
+              <Box component="span" sx={{ fontSize: '0.75rem' }}>⭐</Box>
+              <Typography
+                variant="caption"
+                sx={{
+                  fontWeight: 700,
+                  color: 'primary.main',
+                  fontSize: '0.75rem',
+                }}
+              >
+                23.7k
+              </Typography>
+            </Box>
+          </Box>
+        </Box>
+
+        {/* Subtitle */}
+        <Typography
+          variant="h6"
+          sx={{
+            color: 'text.secondary',
+            fontWeight: 500,
+            mb: 1,
+          }}
+        >
+          AI-Powered Computer Use Automation
+        </Typography>
+
+        {/* Description */}
+        <Typography
+          variant="body1"
+          sx={{
+            color: 'text.secondary',
+            maxWidth: '650px',
+            mb: 6,
+            lineHeight: 1.7,
+          }}
+        >
+          Watch in real-time as AI agents write and execute Python code to complete tasks.
+          Built by Hugging Face, <strong>smolagents</strong> is LLM-agnostic and uses <strong>30% fewer steps</strong> than traditional agents.
+        </Typography>
+
+        {/* Task Input Section */}
+        <Paper
+          elevation={0}
+          sx={{
+            maxWidth: '700px',
+            width: '100%',
+            p: 2.5,
+            border: '2px solid',
+            borderColor: isConnected ? 'primary.main' : 'divider',
+            borderRadius: 2,
+            backgroundColor: 'background.paper',
+            transition: 'all 0.2s ease',
+            '&:hover': isConnected ? {
+              borderColor: 'primary.dark',
+              boxShadow: (theme) => `0 4px 16px ${theme.palette.mode === 'dark' ? 'rgba(79, 134, 198, 0.3)' : 'rgba(79, 134, 198, 0.15)'}`,
+            } : {},
+          }}
+        >
+          {/* Input Field */}
+          <TextField
+            fullWidth
+            placeholder="Describe your task here..."
+            value={customTask}
+            onChange={(e) => setCustomTask(e.target.value)}
+            onKeyPress={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey && isConnected && customTask.trim() && !isTyping) {
+                handleCustomTask();
+              }
+            }}
+            disabled={!isConnected || isTyping}
+            multiline
+            rows={3}
+            sx={{
+              mb: 2,
+              '& .MuiOutlinedInput-root': {
+                borderRadius: 1.5,
+                backgroundColor: 'action.hover',
+                color: 'text.primary',
+                '& fieldset': {
+                  borderColor: 'divider',
+                },
+                '&:hover fieldset': {
+                  borderColor: 'text.secondary',
+                },
+                '&.Mui-focused fieldset': {
+                  borderColor: 'primary.main',
+                  borderWidth: '2px',
+                },
+              },
+              '& .MuiInputBase-input': {
+                color: (theme) => theme.palette.mode === 'dark' ? '#FFFFFF !important' : '#000000 !important',
+                fontWeight: 500,
+                WebkitTextFillColor: (theme) => theme.palette.mode === 'dark' ? '#FFFFFF !important' : '#000000 !important',
+              },
+              '& .MuiInputBase-input.Mui-disabled': {
+                color: (theme) => theme.palette.mode === 'dark' ? '#FFFFFF !important' : '#000000 !important',
+                WebkitTextFillColor: (theme) => theme.palette.mode === 'dark' ? '#FFFFFF !important' : '#000000 !important',
+              },
+              '& .MuiInputBase-input::placeholder': {
+                color: 'text.secondary',
+                opacity: 0.7,
+              },
+            }}
+          />
+
+          {/* Model Selection + Buttons Row */}
+          <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center', justifyContent: 'space-between' }}>
+            {/* Model Select */}
+            <FormControl size="small" sx={{ minWidth: 240 }}>
+              <InputLabel id="model-select-label">Model</InputLabel>
+              <Select
+                labelId="model-select-label"
+                value={availableModels.length > 0 && availableModels.includes(selectedModelId) ? selectedModelId : ''}
+                label="Model"
+                onChange={(e) => setSelectedModelId(e.target.value)}
+                disabled={!isConnected || isTyping || isLoadingModels}
+                sx={{
+                  borderRadius: 1.5,
+                  '& .MuiOutlinedInput-notchedOutline': {
+                    borderWidth: 2,
+                  },
+                }}
+              >
+                {isLoadingModels ? (
+                  <MenuItem disabled>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <CircularProgress size={16} />
+                      <Typography variant="body2">Loading models...</Typography>
+                    </Box>
+                  </MenuItem>
+                ) : availableModels.length === 0 ? (
+                  <MenuItem disabled>
+                    <Typography variant="body2" sx={{ color: 'error.main' }}>
+                      No models available
+                    </Typography>
+                  </MenuItem>
+                ) : (
+                  availableModels.map((modelId) => (
+                    <MenuItem key={modelId} value={modelId}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <SmartToyIcon sx={{ fontSize: '0.9rem', color: 'primary.main' }} />
+                        <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.875rem' }}>
+                          {modelId.split('/').pop()}
+                        </Typography>
+                      </Box>
+                    </MenuItem>
+                  ))
+                )}
+              </Select>
+            </FormControl>
+
+            {/* Buttons on the right */}
+            <Box sx={{ display: 'flex', gap: 1.5 }}>
+              <Button
+                variant="outlined"
+                onClick={handleWriteRandomTask}
+                disabled={!isConnected || isTyping || isGeneratingQuestion}
+                startIcon={isGeneratingQuestion ? <CircularProgress size={16} /> : <ShuffleIcon />}
+                sx={{
+                  borderRadius: 1.5,
+                  textTransform: 'none',
+                  fontWeight: 600,
+                  borderWidth: 2,
+                  px: 3,
+                  '&:hover': {
+                    borderWidth: 2,
+                  },
+                }}
+              >
+                {isGeneratingQuestion ? 'Generating...' : isTyping ? 'Writing...' : 'Write random task'}
+              </Button>
+
+              <Button
+                variant="contained"
+                onClick={handleCustomTask}
+                disabled={!isConnected || !customTask.trim() || isTyping}
+                sx={{
+                  borderRadius: 1.5,
+                  textTransform: 'none',
+                  fontWeight: 600,
+                  px: 4,
+                  background: 'linear-gradient(135deg, #4F86C6 0%, #2B5C94 100%)',
+                }}
+                endIcon={<SendIcon />}
+              >
+                Run Task
+              </Button>
+            </Box>
+          </Box>
+        </Paper>
+
+        {/* Connection status hint */}
+        {!isConnected && (
+          <Typography
+            variant="caption"
+            sx={{
+              mt: 2,
+              color: 'text.secondary',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 1,
+            }}
+          >
+            <Box
+              sx={{
+                width: 8,
+                height: 8,
+                borderRadius: '50%',
+                backgroundColor: 'warning.main',
+                animation: 'pulse 2s ease-in-out infinite',
+                '@keyframes pulse': {
+                  '0%, 100%': { opacity: 1 },
+                  '50%': { opacity: 0.5 },
+                },
+              }}
+            />
+            Make sure the backend is running on port 8000
+          </Typography>
+        )}
+      </Container>
+    </>
+  );
+};
