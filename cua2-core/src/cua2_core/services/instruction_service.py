@@ -14,12 +14,9 @@ class InstructionService:
     available_models = AVAILABLE_MODELS
     seed_topics = [
         "web browsing",
-        "email management",
-        "calendar scheduling",
-        "file management",
+        "file management (linux)",
         "note-taking",
-        "system settings",
-        "text editing",
+        "text/document editing (no existing document required, create a new one if needed, use libreoffice)",
         "terminal commands",
     ]
 
@@ -60,32 +57,37 @@ class InstructionService:
         (
             "Generate a clear and specific web browsing task instruction for a desktop automation agent. "
             "The task should be goal-centric, focused on retrieving information or performing an action online. "
-            "You can specify a URL or website to visit. "
+            "Directly specify a URL or website to visit (e.g., 'Go to google.com and search for...'). "
+            "Do NOT instruct the agent to open a browser application first - just specify the URL or web task directly. "
             "Return only the task instruction, nothing else. Keep it simple and focused on a single goal."
         ),
         (
             "Create a practical web browsing task for desktop automation. "
             "The task should focus on finding specific information or completing an online action. "
-            "Include a specific URL or website name if relevant to the goal. "
+            "Include a specific URL or website name and what to do there (e.g., 'Visit github.com and...'). "
+            "Do NOT include steps about opening a browser - just specify the web task directly. "
             "Provide only the task description without any additional explanation."
         ),
         (
             "Generate a specific web browsing task that a desktop automation agent can perform. "
             "The task should be about retrieving information or performing an action on a website. "
-            "You may specify URLs or web addresses. Keep it concrete and single-purpose. "
-            "Return just the task instruction."
+            "Specify URLs or web addresses directly (e.g., 'Navigate to wikipedia.org and...'). "
+            "Do NOT mention opening a browser application - assume the agent will handle that automatically. "
+            "Keep it concrete and single-purpose. Return just the task instruction."
         ),
         (
             "Provide a goal-oriented web browsing task instruction for a desktop agent. "
             "Focus on what information to find or what action to perform online. "
-            "Specify a URL or website if it helps achieve the goal. "
+            "Specify a URL or website directly as part of the task (e.g., 'Go to amazon.com and...'). "
+            "Do NOT instruct to open a browser first - just state the URL and the web task. "
             "Output only the instruction."
         ),
         (
             "Think of a realistic web browsing task suitable for desktop automation. "
             "The task should be about accessing online information or performing a web-based action. "
-            "Include specific URLs or websites as needed. Keep it simple and goal-focused. "
-            "Return only the task."
+            "Include specific URLs or websites with the action to perform (e.g., 'Visit youtube.com and...'). "
+            "Do NOT include opening a browser as a separate step - just specify the web task directly. "
+            "Keep it simple and goal-focused. Return only the task."
         ),
     ]
 

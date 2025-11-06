@@ -88,3 +88,32 @@ class SandboxService:
                 await asyncio.to_thread(self.sandboxes[session_hash].kill)
                 del self.sandboxes[session_hash]
                 del self.sandbox_metadata[session_hash]
+
+
+if __name__ == "__main__":
+    desktop: Sandbox = Sandbox.create(
+        api_key=os.getenv("E2B_API_KEY"),
+        resolution=(WIDTH, HEIGHT),
+        dpi=96,
+        timeout=SANDBOX_TIMEOUT,
+        template="k0wmnzir0zuzye6dndlw",
+    )
+    desktop.stream.start(require_auth=True)
+    setup_cmd = """sudo mkdir -p /usr/lib/firefox-esr/distribution && echo '{"policies":{"OverrideFirstRunPage":"","OverridePostUpdatePage":"","DisableProfileImport":true,"DontCheckDefaultBrowser":true}}' | sudo tee /usr/lib/firefox-esr/distribution/policies.json > /dev/null"""
+    desktop.commands.run(setup_cmd)
+    print(
+        desktop.stream.get_url(
+            auto_connect=True,
+            view_only=False,
+            resize="scale",
+            auth_key=desktop.stream.get_auth_key(),
+        )
+    )
+    try:
+        while True:
+            application = input("Enter application to launch: ")
+            desktop.commands.run(f"{application} &")
+    except (KeyboardInterrupt, Exception):
+        pass
+
+    desktop.kill()

@@ -1,12 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Box, Typography, Button, Container, Paper, TextField, IconButton, Select, MenuItem, FormControl, InputLabel, CircularProgress } from '@mui/material';
-import ShuffleIcon from '@mui/icons-material/Shuffle';
-import SendIcon from '@mui/icons-material/Send';
-import LightModeOutlined from '@mui/icons-material/LightModeOutlined';
-import DarkModeOutlined from '@mui/icons-material/DarkModeOutlined';
-import SmartToyIcon from '@mui/icons-material/SmartToy';
-import { useAgentStore, selectSelectedModelId, selectIsDarkMode, selectAvailableModels, selectIsLoadingModels } from '@/stores/agentStore';
 import { fetchAvailableModels, generateRandomQuestion } from '@/services/api';
+import { selectAvailableModels, selectIsDarkMode, selectIsLoadingModels, selectSelectedModelId, useAgentStore } from '@/stores/agentStore';
+import DarkModeOutlined from '@mui/icons-material/DarkModeOutlined';
+import LightModeOutlined from '@mui/icons-material/LightModeOutlined';
+import SendIcon from '@mui/icons-material/Send';
+import ShuffleIcon from '@mui/icons-material/Shuffle';
+import SmartToyIcon from '@mui/icons-material/SmartToy';
+import { Box, Button, CircularProgress, Container, FormControl, IconButton, InputLabel, MenuItem, Paper, Select, TextField, Typography } from '@mui/material';
+import React, { useEffect, useRef, useState } from 'react';
 
 interface WelcomeScreenProps {
   onStartTask: (instruction: string, modelId: string) => void;
@@ -147,7 +147,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStartTask, isCon
             color: 'text.primary',
           }}
         >
-          CUA2 Agent
+          Computer Use Agent
         </Typography>
 
         {/* Powered by smolagents */}

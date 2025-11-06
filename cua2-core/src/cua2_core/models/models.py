@@ -77,7 +77,11 @@ class AgentAction(FunctionCall):
             seconds = args.get("seconds") or args.get("arg_0")
             return f"Wait for {seconds} seconds"
 
-        elif action_type == "open":
+        elif action_type == "open_url":
+            url = args.get("url") or args.get("arg_0")
+            return f"Open: {url}"
+
+        elif action_type == "launch":
             url = args.get("url") or args.get("arg_0")
             return f"Open: {url}"
 
@@ -100,7 +104,7 @@ class AgentStep(BaseModel):
     step_evaluation: Literal["like", "dislike", "neutral"]
     error: Optional[str] = None
     thought: Optional[str] = None
-    actions: Optional[list[AgentAction]] = None
+    actions: list[AgentAction] = []
 
     @field_serializer("actions")
     def serialize_actions(self, actions: list[AgentAction], _info):

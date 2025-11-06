@@ -1,6 +1,6 @@
+import { AgentStep, AgentTrace, AgentTraceMetadata, FinalStep } from '@/types/agent';
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
-import { AgentTrace, AgentStep, AgentTraceMetadata, FinalStep } from '@/types/agent';
 
 interface AgentState {
   // State
@@ -39,7 +39,7 @@ const initialState = {
   isAgentProcessing: false,
   isConnectingToE2B: false,
   vncUrl: '',
-  selectedModelId: 'Qwen/Qwen3-VL-8B-Instruct',
+  selectedModelId: 'Qwen/Qwen3-VL-30B-A3B-Instruct',
   availableModels: [],
   isLoadingModels: false,
   isConnected: false,

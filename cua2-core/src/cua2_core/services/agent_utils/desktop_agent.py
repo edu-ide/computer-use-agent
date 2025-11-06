@@ -24,11 +24,13 @@ class E2BVisionAgent(CodeAgent):
         verbosity_level: LogLevel = 2,
         planning_interval: int | None = None,
         use_v1_prompt: bool = False,
+        qwen_normalization: bool = True,
         **kwargs,
     ):
         self.desktop = desktop
         self.data_dir = data_dir
         self.planning_interval = planning_interval
+        self.qwen_normalization = qwen_normalization
         # Initialize Desktop
         self.width, self.height = self.desktop.get_screen_size()
         print(f"Screen size: {self.width}x{self.height}")
@@ -60,6 +62,27 @@ class E2BVisionAgent(CodeAgent):
         self.logger.log("Setting up agent tools...")
         self._setup_desktop_tools()
 
+    def _qwen_unnormalization(self, arguments: dict[str, int]) -> dict[str, int]:
+        """
+        Unnormalize coordinates from 0-999 range to actual screen pixel coordinates.
+        Coordinates are identified by keys containing 'x' or 'y'.
+
+        Args:
+            arguments: Dictionary with coordinate parameters (keys containing 'x' or 'y')
+
+        Returns:
+            Dictionary with unnormalized pixel coordinates
+        """
+        unnormalized: dict[str, int] = {}
+        for key, value in arguments.items():
+            if "x" in key.lower() and "y" not in key.lower():
+                unnormalized[key] = int((value / 1000) * self.width)
+            elif "y" in key.lower():
+                unnormalized[key] = int((value / 1000) * self.height)
+            else:
+                unnormalized[key] = value
+        return unnormalized
+
     def _setup_desktop_tools(self):
         """Register all desktop tools"""
 
@@ -71,6 +94,9 @@ class E2BVisionAgent(CodeAgent):
                 x: The x coordinate (horizontal position)
                 y: The y coordinate (vertical position)
             """
+            if self.qwen_normalization:
+                coords = self._qwen_unnormalization({"x": x, "y": y})
+                x, y = coords["x"], coords["y"]
             self.desktop.move_mouse(x, y)
             self.desktop.left_click()
             self.click_coordinates = [x, y]
@@ -85,6 +111,9 @@ class E2BVisionAgent(CodeAgent):
                 x: The x coordinate (horizontal position)
                 y: The y coordinate (vertical position)
             """
+            if self.qwen_normalization:
+                coords = self._qwen_unnormalization({"x": x, "y": y})
+                x, y = coords["x"], coords["y"]
             self.desktop.move_mouse(x, y)
             self.desktop.right_click()
             self.click_coordinates = [x, y]
@@ -99,6 +128,9 @@ class E2BVisionAgent(CodeAgent):
                 x: The x coordinate (horizontal position)
                 y: The y coordinate (vertical position)
             """
+            if self.qwen_normalization:
+                coords = self._qwen_unnormalization({"x": x, "y": y})
+                x, y = coords["x"], coords["y"]
             self.desktop.move_mouse(x, y)
             self.desktop.double_click()
             self.click_coordinates = [x, y]
@@ -113,6 +145,9 @@ class E2BVisionAgent(CodeAgent):
                 x: The x coordinate (horizontal position)
                 y: The y coordinate (vertical position)
             """
+            if self.qwen_normalization:
+                coords = self._qwen_unnormalization({"x": x, "y": y})
+                x, y = coords["x"], coords["y"]
             self.desktop.move_mouse(x, y)
             self.logger.log(f"Moved mouse to coordinates ({x}, {y})")
             return f"Moved mouse to coordinates ({x}, {y})"
@@ -167,6 +202,11 @@ class E2BVisionAgent(CodeAgent):
                 x2: end x coordinate
                 y2: end y coordinate
             """
+            if self.qwen_normalization:
+                coords = self._qwen_unnormalization(
+                    {"x1": x1, "y1": y1, "x2": x2, "y2": y2}
+                )
+                x1, y1, x2, y2 = coords["x1"], coords["y1"], coords["x2"], coords["y2"]
             self.desktop.drag([x1, y1], [x2, y2])
             message = f"Dragged and dropped from [{x1}, {y1}] to [{x2}, {y2}]"
             self.logger.log(message)
@@ -182,6 +222,9 @@ class E2BVisionAgent(CodeAgent):
                 direction: The direction to scroll ("up" or "down"), defaults to "down". For zoom, "up" zooms in, "down" zooms out.
                 amount: The amount to scroll. A good amount is 1 or 2.
             """
+            if self.qwen_normalization:
+                coords = self._qwen_unnormalization({"x": x, "y": y})
+                x, y = coords["x"], coords["y"]
             self.desktop.move_mouse(x, y)
             self.desktop.scroll(direction=direction, amount=amount)
             message = f"Scrolled {direction} by {amount}"
@@ -200,17 +243,29 @@ class E2BVisionAgent(CodeAgent):
             return f"Waited for {seconds} seconds"
 
         @tool
-        def open(url: str) -> str:
+        def open_url(url: str) -> str:
             """
             Directly opens a browser with the specified url: use this at start of web searches rather than trying to click the browser.
             Args:
                 url: The URL to open
             """
+            if not url.startswith("http") and not url.startswith("https"):
+                url = f"https://{url}"
             self.desktop.open(url)
 
             time.sleep(2)
             self.logger.log(f"Opening URL: {url}")
             return f"Opened URL: {url}"
+
+        @tool
+        def launch(app: str) -> str:
+            """
+            Launches the specified application
+            Args:
+                app: The application to launch
+            """
+            self.desktop.commands.run(f"{app}", background=True)
+            return f"Launched application: {app}"
 
         # Register the tools
         self.tools["click"] = click
@@ -221,7 +276,8 @@ class E2BVisionAgent(CodeAgent):
         self.tools["press"] = press
         self.tools["scroll"] = scroll
         self.tools["wait"] = wait
-        self.tools["open"] = open
+        self.tools["open_url"] = open_url
+        self.tools["launch"] = launch
         self.tools["go_back"] = go_back
         self.tools["drag"] = drag
         self.tools["scroll"] = scroll
