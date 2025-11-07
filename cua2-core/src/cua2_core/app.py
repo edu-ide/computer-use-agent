@@ -21,11 +21,13 @@ async def lifespan(app: FastAPI):
     if not os.getenv("HF_TOKEN"):
         raise ValueError("HF_TOKEN is not set")
 
+    num_workers = int(os.getenv("NUM_WORKERS", "1"))
+
     websocket_manager = WebSocketManager()
 
     sandbox_service = SandboxService()
 
-    agent_service = AgentService(websocket_manager, sandbox_service)
+    agent_service = AgentService(websocket_manager, sandbox_service, num_workers)
 
     # Store services in app state for access in routes
     app.state.websocket_manager = websocket_manager

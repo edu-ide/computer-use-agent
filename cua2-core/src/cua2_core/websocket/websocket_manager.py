@@ -62,7 +62,12 @@ class WebSocketManager:
                 self.disconnect(websocket)
             raise WebSocketException()
 
-    async def send_agent_start(self, active_task: ActiveTask, websocket: WebSocket):
+    async def send_agent_start(
+        self,
+        active_task: ActiveTask,
+        websocket: WebSocket,
+        status: Literal["max_sandboxes_reached", "success"],
+    ):
         """Send agent start event"""
         event = AgentStartEvent(
             agentTrace=AgentTrace(
@@ -74,6 +79,7 @@ class WebSocketManager:
                 traceMetadata=active_task.traceMetadata,
                 isRunning=True,
             ),
+            status=status,
         )
         await self.send_message(event, websocket)
 
@@ -94,7 +100,9 @@ class WebSocketManager:
         self,
         metadata: AgentTraceMetadata,
         websocket: WebSocket,
-        final_state: Literal["success", "stopped", "max_steps_reached", "error"],
+        final_state: Literal[
+            "success", "stopped", "max_steps_reached", "error", "timeout"
+        ],
     ):
         """Send agent complete event"""
         event = AgentCompleteEvent(traceMetadata=metadata, final_state=final_state)

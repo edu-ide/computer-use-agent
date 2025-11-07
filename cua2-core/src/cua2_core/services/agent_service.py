@@ -19,7 +19,7 @@ from cua2_core.services.agent_utils.function_parser import parse_function_call
 from cua2_core.services.agent_utils.get_model import get_model
 from cua2_core.services.sandbox_service import SandboxService
 from cua2_core.websocket.websocket_manager import WebSocketException, WebSocketManager
-from e2b_desktop import Sandbox
+from e2b_desktop import Sandbox, TimeoutException
 from fastapi import WebSocket
 from PIL import Image
 from smolagents import ActionStep, AgentImage, AgentMaxStepsError, TaskStep
@@ -37,33 +37,50 @@ class AgentService:
     """Service for handling agent tasks and processing"""
 
     def __init__(
-        self, websocket_manager: WebSocketManager, sandbox_service: SandboxService
+        self,
+        websocket_manager: WebSocketManager,
+        sandbox_service: SandboxService,
+        num_workers: int,
     ):
         self.active_tasks: dict[str, ActiveTask] = {}
         self.websocket_manager: WebSocketManager = websocket_manager
         self.task_websockets: dict[str, WebSocket] = {}
         self.sandbox_service: SandboxService = sandbox_service
-        self.last_screenshot: dict[str, AgentImage] = {}
+        self.last_screenshot: dict[str, AgentImage | None] = {}
+        self._lock = asyncio.Lock()
+        self.max_sandboxes = int(600 / num_workers)
 
-    async def process_user_task(self, trace: AgentTrace, websocket: WebSocket) -> str:
+    async def process_user_task(
+        self, trace: AgentTrace, websocket: WebSocket
+    ) -> str | None:
         """Process a user task and return the trace ID"""
 
         trace_id = trace.id
         trace.steps = []
         trace.traceMetadata = AgentTraceMetadata(traceId=trace_id)
 
-        # Store the task
-        self.active_tasks[trace_id] = ActiveTask(
-            message_id=trace_id,
-            instruction=trace.instruction,
-            model_id=trace.modelId,
-            timestamp=trace.timestamp,
-            steps=trace.steps,
-            traceMetadata=trace.traceMetadata,
-        )
+        async with self._lock:
+            active_task = ActiveTask(
+                message_id=trace_id,
+                instruction=trace.instruction,
+                model_id=trace.modelId,
+                timestamp=trace.timestamp,
+                steps=trace.steps,
+                traceMetadata=trace.traceMetadata,
+            )
 
-        # Store the websocket for this task
-        self.task_websockets[trace_id] = websocket
+            if len(self.active_tasks) >= self.max_sandboxes:
+                await self.websocket_manager.send_agent_start(
+                    active_task=active_task,
+                    status="max_sandboxes_reached",
+                    websocket=websocket,
+                )
+                return trace_id
+
+            # Store the task and websocket for this task
+            self.active_tasks[trace_id] = active_task
+            self.task_websockets[trace_id] = websocket
+            self.last_screenshot[trace_id] = None
 
         asyncio.create_task(self._agent_processing(trace_id))
 
@@ -87,7 +104,9 @@ class AgentService:
             websocket = self.task_websockets.get(message_id)
 
             await self.websocket_manager.send_agent_start(
-                active_task=self.active_tasks[message_id], websocket=websocket
+                active_task=self.active_tasks[message_id],
+                websocket=websocket,
+                status="success",
             )
 
             model = get_model(self.active_tasks[message_id].model_id)
@@ -145,6 +164,9 @@ class AgentService:
         except WebSocketException:
             websocket_exception = True
 
+        except TimeoutException:
+            final_state = "sandbox_timeout"
+
         except (Exception, KeyboardInterrupt):
             import traceback
 
@@ -170,17 +192,23 @@ class AgentService:
 
             novnc_active = False
 
-            # Clean up
+            self.active_tasks[message_id].update_trace_metadata(
+                final_state=final_state,
+            )
+
             if message_id in self.active_tasks:
                 self.active_tasks[message_id].store_model()
-                del self.active_tasks[message_id]
 
-            # Clean up websocket reference
-            if message_id in self.task_websockets:
-                del self.task_websockets[message_id]
+            # Clean up
+            async with self._lock:
+                if message_id in self.active_tasks:
+                    del self.active_tasks[message_id]
 
-            if message_id in self.last_screenshot:
-                del self.last_screenshot[message_id]
+                if message_id in self.task_websockets:
+                    del self.task_websockets[message_id]
+
+                if message_id in self.last_screenshot:
+                    del self.last_screenshot[message_id]
 
             # Release sandbox back to the pool
             if sandbox:
@@ -211,7 +239,7 @@ class AgentService:
             time.sleep(3)
 
             image = self.last_screenshot[message_id]
-            # agent.last_marked_screenshot = AgentImage(screenshot_path)
+            assert image is not None
 
             for previous_memory_step in (
                 agent.memory.steps
@@ -261,8 +289,6 @@ class AgentService:
                 del image
             else:
                 image_base64 = None
-
-            logger.info(memory_step)
 
             step = AgentStep(
                 traceId=message_id,
