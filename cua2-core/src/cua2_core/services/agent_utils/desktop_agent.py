@@ -172,15 +172,15 @@ class E2BVisionAgent(CodeAgent):
             return f"Typed text: '{clean_text}'"
 
         @tool
-        def press(key: str) -> str:
+        def press(keys: list[str]) -> str:
             """
             Presses a keyboard key
             Args:
-                key: The key to press (e.g. "enter", "space", "backspace", etc.).
+                keys: The keys to press (e.g. ["enter", "space", "backspace", etc.]).
             """
-            self.desktop.press(key)
-            self.logger.log(f"Pressed key: {key}")
-            return f"Pressed key: {key}"
+            self.desktop.press(keys)
+            self.logger.log(f"Pressed keys: {keys}")
+            return f"Pressed keys: {keys}"
 
         @tool
         def go_back() -> str:

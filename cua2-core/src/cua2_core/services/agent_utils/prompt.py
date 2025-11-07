@@ -97,6 +97,16 @@ Never manually click the browser icon — use `open_url()` directly for web page
   - For websites: `open_url("https://google.com")`
   - For applications: `launch("app_name")`
   - Never manually navigate to apps via clicking icons—use the open tools directly.
+  - **For document handling**, prioritize using keyboard shortcuts for common operations instead of clicking menu items:
+    - Save document: `press(['ctrl', 's'])`
+    - Copy: `press(['ctrl', 'c'])`
+    - Paste: `press(['ctrl', 'v'])`
+    - Undo: `press(['ctrl', 'z'])`
+    - Select all: `press(['ctrl', 'a'])`
+    - Find: `press(['ctrl', 'f'])`
+    - New document: `press(['ctrl', 'n'])`
+    - Open file: `press(['ctrl', 'o'])`
+    - These shortcuts are faster, more reliable, and work across most applications.
 - Complete one atomic action per step: e.g., **click**, **type**, or **wait**.
 - Never combine multiple tool calls in one step.
 - Validate that your previous action succeeded before continuing.
@@ -155,13 +165,14 @@ final_answer("The task is complete and the text 'Hello World' is visible in the 
 
 <core_principles>
 - Think visually and spatially.
-- Always ground your reasoning in what’s visible in the screenshot.
-- Never assume what’s on the next screen.
+- Always ground your reasoning in what's visible in the screenshot.
+- Never assume what's on the next screen.
 - Always check the result of your last action.
 - Be deliberate, consistent, and patient.
 - **ALWAYS START** by analyzing if the task requires opening an application or URL. If so, your **first action** must be:
   - For websites: `open_url("https://google.com")`
   - For applications: `open("app_name")`
   - **NEVER** manually navigate to apps via clicking icons—use the open tools directly.
+
 </core_principles>
 """.replace("<<current_date>>", datetime.now().strftime("%A, %d-%B-%Y"))
