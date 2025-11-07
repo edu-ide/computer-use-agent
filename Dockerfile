@@ -14,27 +14,53 @@ RUN npm run build
 # Stage 2: Production image
 FROM python:3.11-slim
 
+# Install system packages as root
 RUN apt-get update && apt-get install -y \
     nginx \
     curl \
     procps \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+# Create a new user named "user" with user ID 1000
+RUN useradd -m -u 1000 user
 
-COPY pyproject.toml uv.lock ./
-COPY cua2-core/ ./cua2-core/
+# Create necessary directories with proper permissions for nginx
+RUN mkdir -p /var/log/nginx /var/lib/nginx /var/cache/nginx /run \
+    && chown -R user:user /var/log/nginx /var/lib/nginx /var/cache/nginx /run \
+    && chmod -R 755 /var/log/nginx /var/lib/nginx /var/cache/nginx /run
 
+# Switch to the "user" user
+USER user
+
+# Set home to the user's home directory
+ENV HOME=/home/user \
+    PATH=/home/user/.local/bin:$PATH
+
+# Set the working directory to the user's home directory
+WORKDIR $HOME/app
+
+# Upgrade pip as user
+RUN pip install --no-cache-dir --upgrade pip
+
+# Install uv as user
 RUN pip install --no-cache-dir uv
 
-RUN cd /app && uv sync --frozen
+# Copy the project files with proper ownership
+COPY --chown=user:user pyproject.toml ./
+COPY --chown=user:user cua2-core/ ./cua2-core/
 
-COPY --from=frontend-builder /app/frontend/dist /app/static
+# Install Python dependencies
+RUN uv sync --all-extras
 
-COPY nginx.conf /etc/nginx/nginx.conf
+# Copy frontend build with proper ownership
+COPY --chown=user:user --from=frontend-builder /app/frontend/dist ./static
 
-COPY entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
+# Copy nginx config (user needs read access)
+COPY --chown=user:user nginx.conf ./nginx.conf
+
+# Copy entrypoint script with proper ownership and make it executable
+COPY --chown=user:user entrypoint.sh ./entrypoint.sh
+RUN chmod +x ./entrypoint.sh
 
 EXPOSE 7860
 
@@ -43,4 +69,4 @@ ENV HOST=0.0.0.0
 ENV PORT=8000
 
 # Use entrypoint script
-ENTRYPOINT ["/app/entrypoint.sh"]
+ENTRYPOINT ["./entrypoint.sh"]

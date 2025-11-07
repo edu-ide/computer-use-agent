@@ -3,7 +3,8 @@ set -e
 
 echo "Starting CUA2 Application..."
 
-service nginx start
+# Start nginx in the background using the config from the app directory
+nginx -c $HOME/app/nginx.conf -g 'daemon off;' &
 
 sleep 2
 
@@ -13,8 +14,9 @@ if ! pgrep nginx > /dev/null; then
     exit 1
 fi
 
+echo "nginx started successfully"
 
-cd /app/cua2-core
+cd $HOME/app/cua2-core
 
 # Set default number of workers if not specified
 WORKERS=${WORKERS:-1}

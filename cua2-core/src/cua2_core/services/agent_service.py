@@ -193,28 +193,22 @@ class AgentService:
 
             time.sleep(3)
 
-            if message_id in self.last_screenshot:
-                memory_step.observations_images = [
-                    self.last_screenshot[message_id].copy()
-                ]
-            else:
-                image = self.last_screenshot[message_id]
-                # agent.last_marked_screenshot = AgentImage(screenshot_path)
+            image = self.last_screenshot[message_id]
+            # agent.last_marked_screenshot = AgentImage(screenshot_path)
 
-                for previous_memory_step in (
-                    agent.memory.steps
-                ):  # Remove previous screenshots from logs for lean processing
-                    if (
-                        isinstance(previous_memory_step, ActionStep)
-                        and previous_memory_step.step_number is not None
-                        and previous_memory_step.step_number
-                        <= memory_step.step_number - 1
-                    ):
-                        previous_memory_step.observations_images = None
-                    elif isinstance(previous_memory_step, TaskStep):
-                        previous_memory_step.task_images = None
+            for previous_memory_step in (
+                agent.memory.steps
+            ):  # Remove previous screenshots from logs for lean processing
+                if (
+                    isinstance(previous_memory_step, ActionStep)
+                    and previous_memory_step.step_number is not None
+                    and previous_memory_step.step_number <= memory_step.step_number - 1
+                ):
+                    previous_memory_step.observations_images = None
+                elif isinstance(previous_memory_step, TaskStep):
+                    previous_memory_step.task_images = None
 
-                memory_step.observations_images = [image.copy()]
+            memory_step.observations_images = [image.copy()]
 
             model_output = (
                 memory_step.model_output_message.content
