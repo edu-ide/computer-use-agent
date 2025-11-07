@@ -59,6 +59,7 @@ interface AgentProgressEvent {
 interface AgentCompleteEvent {
   type: 'agent_complete';
   traceMetadata: AgentTraceMetadata;
+  final_state: 'success' | 'stopped' | 'max_steps_reached' | 'error';
 }
 
 interface AgentErrorEvent {
@@ -94,4 +95,10 @@ export type WebSocketEvent =
 export interface UserTaskMessage {
   type: 'user_task';
   trace: AgentTrace;
+}
+
+
+export interface StopTaskMessage {
+  type: 'stop_task';
+  traceId: string;
 }

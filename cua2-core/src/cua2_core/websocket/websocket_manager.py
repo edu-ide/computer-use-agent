@@ -1,6 +1,6 @@
 import asyncio
 import json
-from typing import Dict, Set
+from typing import Dict, Literal, Set
 
 from cua2_core.models.models import (
     ActiveTask,
@@ -91,10 +91,13 @@ class WebSocketManager:
         await self.send_message(event, websocket)
 
     async def send_agent_complete(
-        self, metadata: AgentTraceMetadata, websocket: WebSocket
+        self,
+        metadata: AgentTraceMetadata,
+        websocket: WebSocket,
+        final_state: Literal["success", "stopped", "max_steps_reached", "error"],
     ):
         """Send agent complete event"""
-        event = AgentCompleteEvent(traceMetadata=metadata)
+        event = AgentCompleteEvent(traceMetadata=metadata, final_state=final_state)
         await self.send_message(event, websocket)
 
     async def send_agent_error(self, error: str, websocket: WebSocket):

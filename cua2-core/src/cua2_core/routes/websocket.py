@@ -59,6 +59,16 @@ async def websocket_endpoint(websocket: WebSocket):
                         else:
                             print("No trace data in message")
 
+                    elif message_data.get("type") == "stop_task":
+                        # Extract and parse the trace
+                        trace_id = message_data.get("trace_id")
+                        if trace_id:
+                            # Stop the task
+                            await agent_service.stop_task(trace_id)
+                            print(f"Stopped task: {trace_id}")
+                        else:
+                            print("No trace ID in message")
+
                 except json.JSONDecodeError as e:
                     print(f"JSON decode error: {e}")
                     from cua2_core.models.models import AgentErrorEvent

@@ -27,6 +27,12 @@ from smolagents import ActionStep, AgentImage, AgentMaxStepsError, TaskStep
 logger = logging.getLogger(__name__)
 
 
+class AgentStopException(Exception):
+    """Exception for agent stop"""
+
+    pass
+
+
 class AgentService:
     """Service for handling agent tasks and processing"""
 
@@ -74,6 +80,7 @@ class AgentService:
         agent = None
         novnc_active = False
         websocket_exception = False
+        final_state = "success"
 
         try:
             # Get the websocket for this task
@@ -129,9 +136,14 @@ class AgentService:
 
             self.active_tasks[message_id].traceMetadata.completed = True
 
+        except AgentStopException as e:
+            if str(e) == "Max steps reached":
+                final_state = "max_steps_reached"
+            elif str(e) == "Task not completed":
+                final_state = "stopped"
+
         except WebSocketException:
             websocket_exception = True
-            pass
 
         except (Exception, KeyboardInterrupt):
             import traceback
@@ -139,6 +151,7 @@ class AgentService:
             logger.error(
                 f"Error processing task: {traceback.format_exc()}", exc_info=True
             )
+            final_state = "error"
             await self.websocket_manager.send_agent_error(
                 error="Error processing task", websocket=websocket
             )
@@ -149,6 +162,7 @@ class AgentService:
                 await self.websocket_manager.send_agent_complete(
                     metadata=self.active_tasks[message_id].traceMetadata,
                     websocket=websocket,
+                    final_state=final_state,
                 )
 
                 if novnc_active:
@@ -191,6 +205,9 @@ class AgentService:
         def step_callback(memory_step: ActionStep, agent: E2BVisionAgent):
             assert memory_step.step_number is not None
 
+            if memory_step.step_number > agent.max_steps:
+                raise AgentStopException("Max steps reached")
+
             time.sleep(3)
 
             image = self.last_screenshot[message_id]
@@ -215,9 +232,7 @@ class AgentService:
                 if memory_step.model_output_message
                 else None
             )
-            if model_output is None and isinstance(
-                memory_step.error, AgentMaxStepsError
-            ):
+            if isinstance(memory_step.error, AgentMaxStepsError):
                 model_output = memory_step.action_output
 
             thought = (
@@ -229,11 +244,14 @@ class AgentService:
                 )
                 else None
             )
-            action_sequence = (
-                model_output.split("```")[1]
-                if model_output and memory_step.error is None
-                else None
-            )
+
+            if model_output is not None:
+                action_sequence = model_output.split("```")[1]
+            else:
+                action_sequence = (
+                    """The task failed due to an error"""  # TODO: To Handle in front
+                )
+
             if memory_step.observations_images:
                 image = memory_step.observations_images[0]
                 buffered = BytesIO()
@@ -243,6 +261,8 @@ class AgentService:
                 del image
             else:
                 image_base64 = None
+
+            logger.info(memory_step)
 
             step = AgentStep(
                 traceId=message_id,
@@ -260,18 +280,14 @@ class AgentService:
                 outputTokensUsed=memory_step.token_usage.output_tokens,
                 step_evaluation="neutral",
             )
-            self.active_tasks[
-                message_id
-            ].traceMetadata.inputTokensUsed += memory_step.token_usage.input_tokens
-            self.active_tasks[
-                message_id
-            ].traceMetadata.outputTokensUsed += memory_step.token_usage.output_tokens
-            self.active_tasks[message_id].traceMetadata.numberOfSteps += 1
-            self.active_tasks[
-                message_id
-            ].traceMetadata.duration += memory_step.timing.duration
 
-            # Add step to active task
+            self.active_tasks[message_id].update_trace_metadata(
+                step_input_tokens_used=memory_step.token_usage.input_tokens,
+                step_output_tokens_used=memory_step.token_usage.output_tokens,
+                step_duration=memory_step.timing.duration,
+                step_numberOfSteps=1,
+            )
+
             self.active_tasks[message_id].update_step(step)
 
             websocket = self.task_websockets.get(message_id)
@@ -284,6 +300,9 @@ class AgentService:
                 loop,
             )
             future.result()
+
+            if self.active_tasks[message_id].traceMetadata.completed:
+                raise AgentStopException("Task not completed")
 
             step_filename = f"{message_id}-{memory_step.step_number}"
             screenshot_bytes = agent.desktop.screenshot()
@@ -367,3 +386,10 @@ class AgentService:
                     raise ValueError(f"Step {step_id} not found in trace")
             except (ValueError, KeyError, TypeError) as e:
                 raise ValueError(f"Error processing step update: {e}")
+
+    async def stop_task(self, trace_id: str):
+        """Stop a task"""
+        if trace_id in self.active_tasks:
+            self.active_tasks[trace_id].update_trace_metadata(
+                completed=True,
+            )

@@ -20,7 +20,7 @@ class E2BVisionAgent(CodeAgent):
         model: Model,
         data_dir: str,
         desktop: Sandbox,
-        max_steps: int = 200,
+        max_steps: int = 30,
         verbosity_level: LogLevel = 2,
         planning_interval: int | None = None,
         use_v1_prompt: bool = False,

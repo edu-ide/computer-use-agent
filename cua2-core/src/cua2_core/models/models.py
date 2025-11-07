@@ -82,7 +82,7 @@ class AgentAction(FunctionCall):
             return f"Open: {url}"
 
         elif action_type == "launch":
-            url = args.get("url") or args.get("arg_0")
+            url = args.get("app") or args.get("arg_0")
             return f"Open: {url}"
 
         elif action_type == "final_answer":
@@ -172,6 +172,7 @@ class AgentCompleteEvent(BaseModel):
 
     type: Literal["agent_complete"] = "agent_complete"
     traceMetadata: AgentTraceMetadata
+    final_state: Literal["success", "stopped", "max_steps_reached", "error"]
 
 
 class AgentErrorEvent(BaseModel):
@@ -222,6 +223,13 @@ class UserTaskMessage(BaseModel):
     agent_trace: AgentTrace | None = None
 
 
+class StopTask(BaseModel):
+    """Stop task message"""
+
+    event_type: Literal["stop_task"]
+    traceId: str
+
+
 ##################### Agent Service ########################
 
 
@@ -256,6 +264,7 @@ class ActiveTask(BaseModel):
                     f,
                     indent=2,
                 )
+        return self
 
     def update_step(self, step: AgentStep):
         """Update step"""
@@ -275,6 +284,27 @@ class ActiveTask(BaseModel):
                     f,
                     indent=2,
                 )
+
+    def update_trace_metadata(
+        self,
+        step_input_tokens_used: int | None = None,
+        step_output_tokens_used: int | None = None,
+        step_duration: float | None = None,
+        step_numberOfSteps: int | None = None,
+        completed: bool | None = None,
+    ):
+        """Update trace metadata"""
+        with self._file_lock:
+            if step_input_tokens_used is not None:
+                self.traceMetadata.inputTokensUsed += step_input_tokens_used
+            if step_output_tokens_used is not None:
+                self.traceMetadata.outputTokensUsed += step_output_tokens_used
+            if step_duration is not None:
+                self.traceMetadata.duration += step_duration
+            if step_numberOfSteps is not None:
+                self.traceMetadata.numberOfSteps += step_numberOfSteps
+            if completed is not None:
+                self.traceMetadata.completed = completed
 
 
 #################### API Routes Models ########################
