@@ -24,19 +24,25 @@ const backgroundPulse = keyframes`
   }
 `;
 
-export const ThinkingStepCard: React.FC = () => {
+interface ThinkingStepCardProps {
+  isActive?: boolean;
+}
+
+export const ThinkingStepCard: React.FC<ThinkingStepCardProps> = ({ isActive = false }) => {
 
   return (
     <Card
       elevation={0}
       sx={{
         backgroundColor: 'background.paper',
-        border: '2px solid',
-        borderColor: 'primary.main',
+        border: '1px solid',
+        borderColor: (theme) => `${isActive ? theme.palette.primary.main : theme.palette.divider} !important`,
         borderRadius: 1.5,
-        animation: `${borderPulse} 2s ease-in-out infinite`,
+        animation: isActive ? `${borderPulse} 2s ease-in-out infinite` : 'none',
         position: 'relative',
         overflow: 'hidden',
+        boxShadow: isActive ? (theme) => `0 2px 8px ${theme.palette.mode === 'dark' ? 'rgba(79, 134, 198, 0.3)' : 'rgba(79, 134, 198, 0.2)'}` : 'none',
+        transition: 'all 0.2s ease',
         '&::before': {
           content: '""',
           position: 'absolute',
@@ -44,7 +50,7 @@ export const ThinkingStepCard: React.FC = () => {
           left: 0,
           right: 0,
           bottom: 0,
-          animation: `${backgroundPulse} 2s ease-in-out infinite`,
+          animation: isActive ? `${backgroundPulse} 2s ease-in-out infinite` : 'none',
           zIndex: 0,
         },
       }}

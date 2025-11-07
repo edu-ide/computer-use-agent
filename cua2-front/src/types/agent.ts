@@ -39,7 +39,7 @@ export interface AgentTraceMetadata {
 }
 
 export interface FinalStep {
-  type: 'success' | 'failure';
+  type: 'success' | 'failure' | 'stopped' | 'max_steps_reached' | 'sandbox_timeout';
   message?: string;
   metadata: AgentTraceMetadata;
 }

@@ -13,8 +13,10 @@ const App = () => {
   const theme = useMemo(() => getTheme(isDarkMode ? 'dark' : 'light'), [isDarkMode]);
 
   // Initialize WebSocket connection at app level so it persists across route changes
+  const { stopCurrentTask } = useAgentWebSocket({ url: getWebSocketUrl() });
 
-  useAgentWebSocket({ url: getWebSocketUrl() });
+  // Store stopCurrentTask in window for global access
+  (window as Window & { __stopCurrentTask?: () => void }).__stopCurrentTask = stopCurrentTask;
 
   return (
     <ThemeProvider theme={theme}>

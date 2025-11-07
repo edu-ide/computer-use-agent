@@ -4,7 +4,7 @@ import { selectError, selectFinalStep, selectSteps, selectTrace, useAgentStore }
 import { AgentStep, AgentTraceMetadata } from '@/types/agent';
 import ImageIcon from '@mui/icons-material/Image';
 import MonitorIcon from '@mui/icons-material/Monitor';
-import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import PlayCircleIcon from '@mui/icons-material/PlayCircle';
 import { Box, Button, CircularProgress, keyframes, Typography } from '@mui/material';
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -58,6 +58,7 @@ export const SandboxViewer: React.FC<SandboxViewerProps> = ({
     trace,
     steps: steps || [],
     metadata: finalStep?.metadata || metadata,
+    finalStep,
   });
 
   // Extract final_answer from the last step, or fallback to last thought
@@ -127,7 +128,7 @@ export const SandboxViewer: React.FC<SandboxViewerProps> = ({
         position: 'relative',
         border: '1px solid',
         borderColor: showStatus
-          ? (finalStep?.type === 'failure' ? 'error.main' : 'success.main')
+          ? ((finalStep?.type === 'failure' || finalStep?.type === 'sandbox_timeout') ? 'error.main' : 'success.main')
           : ((vncUrl || isAgentProcessing) && !selectedStep && !showStatus ? 'primary.main' : 'divider'),
         borderRadius: '12px',
         backgroundColor: 'background.paper',
@@ -191,7 +192,7 @@ export const SandboxViewer: React.FC<SandboxViewerProps> = ({
             // Go Live Button when viewing a specific step
             <Button
               onClick={handleGoLive}
-              startIcon={<PlayArrowIcon sx={{ fontSize: 20 }} />}
+              startIcon={<PlayCircleIcon sx={{ fontSize: 20 }} />}
               sx={{
                 position: 'absolute',
                 top: 12,
@@ -307,6 +308,7 @@ export const SandboxViewer: React.FC<SandboxViewerProps> = ({
             src={vncUrl}
             style={{ width: '100%', height: '100%', border: 'none' }}
             title="OS Stream"
+            lang="en"
           />
         ) : isAgentProcessing ? (
           // Loading state

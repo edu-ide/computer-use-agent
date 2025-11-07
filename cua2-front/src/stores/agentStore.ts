@@ -20,7 +20,7 @@ interface AgentState {
   // Actions
   setTrace: (trace: AgentTrace | undefined) => void;
   updateTraceWithStep: (step: AgentStep, metadata: AgentTraceMetadata) => void;
-  completeTrace: (metadata: AgentTraceMetadata) => void;
+  completeTrace: (metadata: AgentTraceMetadata, finalState?: 'success' | 'stopped' | 'max_steps_reached' | 'error' | 'sandbox_timeout') => void;
   setIsAgentProcessing: (processing: boolean) => void;
   setIsConnectingToE2B: (connecting: boolean) => void;
   setVncUrl: (url: string) => void;
@@ -90,42 +90,62 @@ export const useAgentStore = create<AgentState>()(
           'updateTraceWithStep'
         ),
 
-      // Complete the trace
-      completeTrace: (metadata) =>
-        set(
-          (state) => {
-            if (!state.trace) return state;
+  // Complete the trace
+  completeTrace: (metadata, finalState?: 'success' | 'stopped' | 'max_steps_reached' | 'error' | 'sandbox_timeout') =>
+    set(
+      (state) => {
+        if (!state.trace) return state;
 
-            // Preserve existing maxSteps if new metadata has 0
-            const updatedMetadata = {
-              ...metadata,
-              maxSteps: metadata.maxSteps > 0
-                ? metadata.maxSteps
-                : (state.trace.traceMetadata?.maxSteps || 200),
-              completed: true,
-            };
+        // Preserve existing maxSteps if new metadata has 0
+        const updatedMetadata = {
+          ...metadata,
+          maxSteps: metadata.maxSteps > 0
+            ? metadata.maxSteps
+            : (state.trace.traceMetadata?.maxSteps || 200),
+          completed: true,
+        };
 
-            // Determine if the task succeeded or failed based on error state
-            const finalStep: FinalStep = {
-              type: state.error ? 'failure' : 'success',
-              message: state.error,
-              metadata: updatedMetadata,
-            };
+        // Determine the final step type based on final_state from backend
+        let stepType: 'success' | 'failure' | 'stopped' | 'max_steps_reached' | 'sandbox_timeout';
+        let stepMessage: string | undefined;
 
-            return {
-              trace: {
-                ...state.trace,
-                isRunning: false,
-                traceMetadata: updatedMetadata,
-              },
-              finalStep,
-              // Keep error in state for display
-              selectedStepIndex: null, // Reset to live mode on completion
-            };
+        if (finalState === 'stopped') {
+          stepType = 'stopped';
+          stepMessage = 'Task stopped by user';
+        } else if (finalState === 'max_steps_reached') {
+          stepType = 'max_steps_reached';
+          stepMessage = 'Maximum steps reached';
+        } else if (finalState === 'sandbox_timeout') {
+          stepType = 'sandbox_timeout';
+          stepMessage = 'Sandbox timeout';
+        } else if (finalState === 'error' || state.error) {
+          stepType = 'failure';
+          stepMessage = state.error || 'Task failed';
+        } else {
+          stepType = 'success';
+          stepMessage = undefined;
+        }
+
+        const finalStep: FinalStep = {
+          type: stepType,
+          message: stepMessage,
+          metadata: updatedMetadata,
+        };
+
+        return {
+          trace: {
+            ...state.trace,
+            isRunning: false,
+            traceMetadata: updatedMetadata,
           },
-          false,
-          'completeTrace'
-        ),
+          finalStep,
+          // Keep error in state for display
+          selectedStepIndex: null, // Reset to live mode on completion
+        };
+      },
+      false,
+      'completeTrace'
+    ),
 
       // Set processing state
       setIsAgentProcessing: (isAgentProcessing) =>

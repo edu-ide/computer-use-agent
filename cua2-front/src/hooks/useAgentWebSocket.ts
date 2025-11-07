@@ -70,8 +70,8 @@ export const useAgentWebSocket = ({ url }: UseAgentWebSocketOptions) => {
         case 'agent_complete':
           setIsAgentProcessing(false);
           setIsConnectingToE2B(false);
-          completeTrace(event.traceMetadata);
-          console.log('Agent complete received:', event.traceMetadata);
+          completeTrace(event.traceMetadata, event.final_state);
+          console.log('Agent complete received:', event.traceMetadata, 'Final state:', event.final_state);
           break;
 
         case 'agent_error':
@@ -157,9 +157,24 @@ export const useAgentWebSocket = ({ url }: UseAgentWebSocketOptions) => {
     };
   }, [setTrace, setIsAgentProcessing, setIsConnectingToE2B, sendMessage, resetAgent]);
 
+  // Function to stop the current task
+  const stopCurrentTask = useCallback(() => {
+    const trace = useAgentStore.getState().trace;
+    if (trace?.id && trace.isRunning) {
+      sendMessage({
+        type: 'stop_task',
+        trace_id: trace.id,
+      });
+      console.log('Stop task sent for trace:', trace.id);
+
+      // Don't update UI state here - wait for backend to send agent_complete with final_state='stopped'
+    }
+  }, [sendMessage]);
+
   return {
     isConnected,
     connectionState,
     manualReconnect,
+    stopCurrentTask,
   };
 };

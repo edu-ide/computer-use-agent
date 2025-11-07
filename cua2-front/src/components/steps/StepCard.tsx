@@ -339,7 +339,14 @@ export const StepCard: React.FC<StepCardProps> = ({ step, index, isLatest = fals
 
         {/* Error */}
         {step.error && (
-          <Box sx={{ mt: 1.5, p: 1, borderRadius: 1, backgroundColor: 'error.main', opacity: 0.1 }}>
+          <Box sx={{
+            mt: 1.5,
+            p: 1,
+            borderRadius: 1,
+            backgroundColor: (theme) => theme.palette.mode === 'dark' ? 'rgba(244, 67, 54, 0.1)' : 'rgba(244, 67, 54, 0.08)',
+            border: '1px solid',
+            borderColor: 'error.main'
+          }}>
             <Typography
               variant="caption"
               sx={{
