@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { AppBar, Toolbar, Box, Typography, Chip, IconButton, CircularProgress, keyframes } from '@mui/material';
+import { AppBar, Toolbar, Box, Typography, Chip, IconButton, CircularProgress, keyframes, Button } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import LightModeOutlined from '@mui/icons-material/LightModeOutlined';
 import DarkModeOutlined from '@mui/icons-material/DarkModeOutlined';
@@ -11,6 +11,7 @@ import OutputIcon from '@mui/icons-material/Output';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
 import FormatListNumberedIcon from '@mui/icons-material/FormatListNumbered';
 import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
+import StopCircleIcon from '@mui/icons-material/StopCircle';
 import { useAgentStore, selectTrace, selectError, selectIsDarkMode, selectMetadata, selectIsConnectingToE2B, selectFinalStep } from '@/stores/agentStore';
 
 interface HeaderProps {
@@ -125,10 +126,16 @@ export const Header: React.FC<HeaderProps> = ({ isAgentProcessing, onBackToHome 
   const getTaskStatus = () => {
     // If we have a final step, use its type
     if (finalStep) {
-      if (finalStep.type === 'failure') {
-        return { label: 'Task failed', color: 'error', icon: <CloseIcon sx={{ fontSize: 16, color: 'error.main' }} /> };
+      switch (finalStep.type) {
+        case 'failure':
+          return { label: 'Task failed', color: 'error', icon: <CloseIcon sx={{ fontSize: 16, color: 'error.main' }} /> };
+        case 'stopped':
+          return { label: 'Task stopped', color: 'warning', icon: <StopCircleIcon sx={{ fontSize: 16, color: 'warning.main' }} /> };
+        case 'max_steps_reached':
+          return { label: 'Max steps reached', color: 'warning', icon: <HourglassEmptyIcon sx={{ fontSize: 16, color: 'warning.main' }} /> };
+        case 'success':
+          return { label: 'Completed', color: 'success', icon: <CheckIcon sx={{ fontSize: 16, color: 'success.main' }} /> };
       }
-      return { label: 'Completed', color: 'success', icon: <CheckIcon sx={{ fontSize: 16, color: 'success.main' }} /> };
     }
     // Otherwise check running states
     if (isConnectingToE2B) return { label: 'Connecting to E2B...', color: 'primary', icon: <CircularProgress size={16} thickness={5} sx={{ color: 'primary.main' }} /> };
@@ -140,6 +147,14 @@ export const Header: React.FC<HeaderProps> = ({ isAgentProcessing, onBackToHome 
 
   // Extract model name from modelId (e.g., "Qwen/Qwen3-VL-8B-Instruct" -> "Qwen3-VL-8B-Instruct")
   const modelName = trace?.modelId?.split('/').pop() || 'Unknown Model';
+
+  // Handler for emergency stop
+  const handleEmergencyStop = () => {
+    const stopTask = (window as Window & { __stopCurrentTask?: () => void }).__stopCurrentTask;
+    if (stopTask) {
+      stopTask();
+    }
+  };
 
   return (
     <AppBar
@@ -188,8 +203,34 @@ export const Header: React.FC<HeaderProps> = ({ isAgentProcessing, onBackToHome 
             </Typography>
           </Box>
 
-          {/* Right side: Dark Mode */}
+          {/* Right side: Emergency Stop + Dark Mode */}
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            {/* Emergency Stop Button - Only show when agent is processing */}
+            {isAgentProcessing && (
+              <Button
+                onClick={handleEmergencyStop}
+                variant="outlined"
+                size="small"
+                startIcon={<StopCircleIcon />}
+                sx={{
+                  color: 'error.main',
+                  borderColor: 'error.main',
+                  backgroundColor: 'transparent',
+                  fontWeight: 600,
+                  fontSize: '0.8rem',
+                  px: 1.5,
+                  py: 0.5,
+                  textTransform: 'none',
+                  '&:hover': {
+                    backgroundColor: 'error.50',
+                    borderColor: 'error.dark',
+                  },
+                }}
+              >
+                Stop
+              </Button>
+            )}
+
             <IconButton
               onClick={toggleDarkMode}
               size="small"

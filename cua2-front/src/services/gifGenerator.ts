@@ -49,32 +49,41 @@ const addStepCounter = async (
       ctx.drawImage(img, 0, 0, width, height);
 
       // Configure counter style
-      const fontSize = Math.max(12, Math.floor(height * 0.08));
-      const padding = Math.max(6, Math.floor(height * 0.03));
+      const fontSize = Math.max(11, Math.floor(height * 0.05));
+      const padding = Math.max(5, Math.floor(height * 0.02));
       const text = `${stepNumber}/${totalSteps}`;
 
       ctx.font = `bold ${fontSize}px Arial, sans-serif`;
       const textMetrics = ctx.measureText(text);
       const textWidth = textMetrics.width;
-      const textHeight = fontSize;
 
-      // Position at bottom right
-      const x = width - textWidth - padding * 2;
-      const y = height - padding * 2;
+      // Use actual text metrics for better vertical centering
+      const actualHeight = textMetrics.actualBoundingBoxAscent + textMetrics.actualBoundingBoxDescent;
 
-      // Draw semi-transparent rectangle for readability
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
-      ctx.fillRect(
-        x - padding,
-        y - textHeight - padding,
-        textWidth + padding * 2,
-        textHeight + padding * 2
-      );
+      // Calculate box dimensions
+      const boxWidth = textWidth + padding * 2;
+      const boxHeight = actualHeight + padding * 2;
 
-      // Draw black text
+      // Position at bottom right with margin
+      const margin = Math.max(8, Math.floor(height * 0.015));
+      const boxX = width - boxWidth - margin;
+      const boxY = height - boxHeight - margin;
+
+      // Draw semi-transparent rounded rectangle for readability
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+      const borderRadius = 4;
+      ctx.beginPath();
+      ctx.roundRect(boxX, boxY, boxWidth, boxHeight, borderRadius);
+      ctx.fill();
+
+      // Draw black text centered in the box
       ctx.fillStyle = '#000000';
-      ctx.textBaseline = 'top';
-      ctx.fillText(text, x, y - textHeight);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'alphabetic';
+      // Position text precisely using actual bounding box metrics
+      const textX = boxX + boxWidth / 2;
+      const textY = boxY + padding + textMetrics.actualBoundingBoxAscent;
+      ctx.fillText(text, textX, textY);
 
       // Convert canvas to base64
       resolve(canvas.toDataURL('image/png'));
@@ -82,6 +91,28 @@ const addStepCounter = async (
 
     img.onerror = () => {
       reject(new Error('Failed to load image'));
+    };
+
+    img.src = imageSrc;
+  });
+};
+
+/**
+ * Get the dimensions of an image
+ * @param imageSrc Image source (base64 or URL)
+ * @returns Promise resolved with image dimensions
+ */
+const getImageDimensions = (imageSrc: string): Promise<{ width: number; height: number }> => {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+
+    img.onload = () => {
+      resolve({ width: img.naturalWidth, height: img.naturalHeight });
+    };
+
+    img.onerror = () => {
+      reject(new Error('Failed to load image to get dimensions'));
     };
 
     img.src = imageSrc;
@@ -99,8 +130,8 @@ export const generateGif = async (
   const {
     images,
     interval = 1.5, // 1.5 seconds per frame by default
-    gifWidth = 400,
-    gifHeight = 200,
+    gifWidth,
+    gifHeight,
     quality = 10,
   } = options;
 
@@ -112,10 +143,20 @@ export const generateGif = async (
   }
 
   try {
+    // Get dimensions from the first image if not specified
+    let width = gifWidth;
+    let height = gifHeight;
+
+    if (!width || !height) {
+      const dimensions = await getImageDimensions(images[0]);
+      width = width || dimensions.width;
+      height = height || dimensions.height;
+    }
+
     // Add counter to each image
     const imagesWithCounter = await Promise.all(
       images.map((img, index) =>
-        addStepCounter(img, index + 1, images.length, gifWidth, gifHeight)
+        addStepCounter(img, index + 1, images.length, width, height)
       )
     );
 
@@ -124,8 +165,8 @@ export const generateGif = async (
         {
           images: imagesWithCounter,
           interval,
-          gifWidth,
-          gifHeight,
+          gifWidth: width,
+          gifHeight: height,
           numFrames: imagesWithCounter.length,
           frameDuration: interval,
           sampleInterval: quality,

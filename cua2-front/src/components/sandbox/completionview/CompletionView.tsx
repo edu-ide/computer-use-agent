@@ -2,6 +2,8 @@ import React from 'react';
 import { Box, Typography, Button, Divider, Alert, Paper } from '@mui/material';
 import CheckIcon from '@mui/icons-material/Check';
 import CloseIcon from '@mui/icons-material/Close';
+import StopCircleIcon from '@mui/icons-material/StopCircle';
+import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
 import AddIcon from '@mui/icons-material/Add';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
 import AssignmentIcon from '@mui/icons-material/Assignment';
@@ -40,8 +42,43 @@ export const CompletionView: React.FC<CompletionViewProps> = ({
   onDownloadJson,
   onBackToHome,
 }) => {
-  const isSuccess = finalStep.type === 'success';
-  const statusColor = isSuccess ? 'success.main' : 'error.main';
+  const getStatusConfig = () => {
+    switch (finalStep.type) {
+      case 'success':
+        return {
+          icon: <CheckIcon sx={{ fontSize: 28 }} />,
+          title: 'Task Completed Successfully!',
+          color: 'success.main',
+        };
+      case 'stopped':
+        return {
+          icon: <StopCircleIcon sx={{ fontSize: 28 }} />,
+          title: 'Task Stopped',
+          color: 'warning.main',
+        };
+      case 'max_steps_reached':
+        return {
+          icon: <HourglassEmptyIcon sx={{ fontSize: 28 }} />,
+          title: 'Maximum Steps Reached',
+          color: 'warning.main',
+        };
+      case 'sandbox_timeout':
+        return {
+          icon: <AccessTimeIcon sx={{ fontSize: 28 }} />,
+          title: 'Sandbox Timeout',
+          color: 'error.main',
+        };
+      case 'failure':
+      default:
+        return {
+          icon: <CloseIcon sx={{ fontSize: 28 }} />,
+          title: 'Task Failed',
+          color: 'error.main',
+        };
+    }
+  };
+
+  const statusConfig = getStatusConfig();
 
   // Format model name for display
   const formatModelName = (modelId: string) => {
@@ -69,32 +106,32 @@ export const CompletionView: React.FC<CompletionViewProps> = ({
               width: 40,
               height: 40,
               borderRadius: '50%',
-              backgroundColor: statusColor,
+              backgroundColor: statusConfig.color,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              boxShadow: (theme) =>
-                isSuccess
-                  ? `0 2px 8px ${theme.palette.mode === 'dark' ? 'rgba(102, 187, 106, 0.3)' : 'rgba(102, 187, 106, 0.2)'}`
-                  : `0 2px 8px ${theme.palette.mode === 'dark' ? 'rgba(244, 67, 54, 0.3)' : 'rgba(244, 67, 54, 0.2)'}`,
+              boxShadow: (theme) => {
+                const rgba = finalStep.type === 'success'
+                  ? '102, 187, 106'
+                  : (finalStep.type === 'failure' || finalStep.type === 'sandbox_timeout')
+                    ? '244, 67, 54'
+                    : '255, 152, 0';
+                return `0 2px 8px ${theme.palette.mode === 'dark' ? `rgba(${rgba}, 0.3)` : `rgba(${rgba}, 0.2)`}`;
+              },
             }}
           >
-            {isSuccess ? (
-              <CheckIcon sx={{ fontSize: 24, color: 'white' }} />
-            ) : (
-              <CloseIcon sx={{ fontSize: 24, color: 'white' }} />
-            )}
+            {React.cloneElement(statusConfig.icon, { sx: { fontSize: 24, color: 'white' } })}
           </Box>
           <Typography
             variant="h6"
             sx={{
               fontWeight: 700,
-              color: statusColor,
+              color: statusConfig.color,
               fontSize: '1.1rem',
               letterSpacing: '-0.5px',
             }}
           >
-            {isSuccess ? 'Task Completed' : 'Task Failed'}
+            {statusConfig.title}
           </Typography>
         </Box>
       </Box>

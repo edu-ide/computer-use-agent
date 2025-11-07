@@ -30,19 +30,25 @@ export const StepsList: React.FC<StepsListProps> = ({ trace }) => {
   // Check if final step is active (when selectedStepIndex is null and finalStep exists and trace is not running)
   const isFinalStepActive = selectedStepIndex === null && finalStep && !trace?.isRunning;
 
+  // Check if thinking card is active (when in live mode and thinking card is shown)
+  const isThinkingCardActive = selectedStepIndex === null && showThinkingCard;
+
   // Determine the active step index
   // If a specific step is selected, use that
   // If the final step is active, no normal step should be active
+  // If the thinking card is active, no normal step should be active
   // Otherwise, show the last step as active
   const activeStepIndex = selectedStepIndex !== null
     ? selectedStepIndex
     : isFinalStepActive
       ? null  // When final step is active, no normal step is active
-      : (trace?.steps && trace.steps.length > 0 && trace?.isRunning)
-        ? trace.steps.length - 1
-        : (trace?.steps && trace.steps.length > 0)
+      : isThinkingCardActive
+        ? null  // When thinking card is active, no normal step is active
+        : (trace?.steps && trace.steps.length > 0 && trace?.isRunning)
           ? trace.steps.length - 1
-          : null;
+          : (trace?.steps && trace.steps.length > 0)
+            ? trace.steps.length - 1
+            : null;
 
   // Manage ConnectionStepCard display:
   // - Shows when isConnectingToE2B = true OR when we had a connection
@@ -101,44 +107,42 @@ export const StepsList: React.FC<StepsListProps> = ({ trace }) => {
     };
   }, [isAgentProcessing, isConnectingToE2B, finalStep]);
 
-  // Auto-scroll to active step when it changes (timeline → steps)
+  // Auto-scroll logic
   useEffect(() => {
-    if (containerRef.current) {
-      isScrollingProgrammatically.current = true;
-      // Use setTimeout to ensure DOM has updated
-      setTimeout(() => {
-        if (containerRef.current) {
-          // Scroll to final step if it's active
-          if (isFinalStepActive) {
-            const finalStepElement = containerRef.current.querySelector(`[data-step-index="final"]`);
-            if (finalStepElement) {
-              finalStepElement.scrollIntoView({
-                behavior: 'smooth',
-                block: 'center'
-              });
-              setTimeout(() => {
-                isScrollingProgrammatically.current = false;
-              }, 500);
-            }
-          }
-          // Otherwise scroll to active step
-          else if (activeStepIndex !== null && trace?.steps) {
-            const activeStepElement = containerRef.current.querySelector(`[data-step-index="${activeStepIndex}"]`);
-            if (activeStepElement) {
-              activeStepElement.scrollIntoView({
-                behavior: 'smooth',
-                block: 'center'
-              });
-              // Reset flag after scroll animation
-              setTimeout(() => {
-                isScrollingProgrammatically.current = false;
-              }, 500);
-            }
-          }
+    const container = containerRef.current;
+    if (!container) return;
+
+    isScrollingProgrammatically.current = true;
+
+    // Use setTimeout to ensure DOM has updated
+    setTimeout(() => {
+      if (!container) return;
+
+      // LIVE MODE: Always scroll to the bottom (last visible element)
+      if (selectedStepIndex === null) {
+        // Scroll to bottom
+        container.scrollTo({
+          top: container.scrollHeight,
+          behavior: 'smooth',
+        });
+      }
+      // NON-LIVE MODE: Scroll to selected step
+      else {
+        const selectedElement = container.querySelector(`[data-step-index="${selectedStepIndex}"]`);
+        if (selectedElement) {
+          selectedElement.scrollIntoView({
+            behavior: 'smooth',
+            block: 'center',
+          });
         }
-      }, 100);
-    }
-  }, [activeStepIndex, trace?.steps?.length, isFinalStepActive]);
+      }
+
+      // Reset flag after scroll animation
+      setTimeout(() => {
+        isScrollingProgrammatically.current = false;
+      }, 500);
+    }, 100);
+  }, [selectedStepIndex, trace?.steps?.length, showThinkingCard, finalStep]);
 
   // Detect which step is visible when scrolling (steps → timeline)
   useEffect(() => {
@@ -148,6 +152,9 @@ export const StepsList: React.FC<StepsListProps> = ({ trace }) => {
     const handleScroll = () => {
       // Don't update if we're scrolling programmatically
       if (isScrollingProgrammatically.current) return;
+
+      // Don't update if agent is running (stay in live mode)
+      if (trace?.isRunning) return;
 
       const containerRect = container.getBoundingClientRect();
       const containerTop = containerRect.top;
@@ -346,7 +353,7 @@ export const StepsList: React.FC<StepsListProps> = ({ trace }) => {
             {/* Show thinking indicator after steps (appears 5 seconds after stream start) */}
             {showThinkingCard && (
               <Box data-step-index="thinking">
-                <ThinkingStepCard />
+                <ThinkingStepCard isActive={isThinkingCardActive} />
               </Box>
             )}
 

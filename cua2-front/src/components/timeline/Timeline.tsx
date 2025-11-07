@@ -2,6 +2,9 @@ import React, { useRef, useEffect } from 'react';
 import { Box, Typography, CircularProgress, Button } from '@mui/material';
 import CheckIcon from '@mui/icons-material/Check';
 import CloseIcon from '@mui/icons-material/Close';
+import StopCircleIcon from '@mui/icons-material/StopCircle';
+import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
+import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import CableIcon from '@mui/icons-material/Cable';
 import { AgentTraceMetadata } from '@/types/agent';
 import { useAgentStore, selectSelectedStepIndex, selectFinalStep, selectIsConnectingToE2B, selectIsAgentProcessing } from '@/stores/agentStore';
@@ -23,8 +26,15 @@ export const Timeline: React.FC<TimelineProps> = ({ metadata, isRunning }) => {
   const showConnectionIndicator = isConnectingToE2B || isAgentProcessing || (metadata.numberOfSteps > 0) || finalStep;
 
   // Generate array of steps with their status
-  // Show all steps up to maxSteps (200)
-  const totalStepsToShow = metadata.maxSteps;
+  // Only show completed steps + current step if running
+  const totalStepsToShow = isRunning && !isConnectingToE2B
+    ? metadata.numberOfSteps + 1  // Show completed steps + current step
+    : metadata.numberOfSteps;     // Show only completed steps when not running
+
+  // Calculate total width for the line (including finalStep if present)
+  const lineWidth = finalStep
+    ? `calc(${totalStepsToShow} * (40px + 12px) + 52px)` // Add space for finalStep (40px + 12px gap)
+    : `calc(${totalStepsToShow} * (40px + 12px))`;
 
   const steps = Array.from({ length: totalStepsToShow }, (_, index) => ({
     stepNumber: index + 1,
@@ -130,13 +140,14 @@ export const Timeline: React.FC<TimelineProps> = ({ metadata, isRunning }) => {
             '&::before': {
               content: '""',
               position: 'absolute',
-              left: "15px",
-              // Calculate width to cover all steps (200 steps * (40px minWidth + 12px gap))
-              width: `calc(${metadata.maxSteps} * (40px + 12px))`,
-              top: '17.5px',
+              left: "25px",
+              // Calculate width to cover visible steps + finalStep if present
+              width: lineWidth,
+              top: '19.5px',
               transform: 'translateY(-50%)',
+              transition: 'width 0.6s cubic-bezier(0.4, 0, 0.2, 1)',
               height: '2px',
-              backgroundColor: (theme) => theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+              backgroundColor: (theme) => theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.3)',
               zIndex: 0,
               pointerEvents: 'none',
             },
@@ -151,7 +162,7 @@ export const Timeline: React.FC<TimelineProps> = ({ metadata, isRunning }) => {
                 flexDirection: 'column',
                 alignItems: 'center',
                 gap: 0.75,
-                minWidth: 50,
+                minWidth: 40,
                 flexShrink: 0,
                 position: 'relative',
                 zIndex: 1,
@@ -164,14 +175,16 @@ export const Timeline: React.FC<TimelineProps> = ({ metadata, isRunning }) => {
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
+                  height: 28,
+                  width: 28,
                 }}
               >
                 {/* White background to hide the line */}
                 <Box
                   sx={{
                     position: 'absolute',
-                    width: 32,
-                    height: 32,
+                    width: 28,
+                    height: 28,
                     borderRadius: '50%',
                     backgroundColor: 'background.paper',
                     zIndex: 0,
@@ -246,14 +259,16 @@ export const Timeline: React.FC<TimelineProps> = ({ metadata, isRunning }) => {
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
+                    height: 28,
+                    width: 28,
                   }}
                 >
                   {/* White background to hide the line */}
                   <Box
                     sx={{
                       position: 'absolute',
-                      width: step.isCurrent || step.isSelected ? 28 : step.isCompleted ? 22 : 20,
-                      height: step.isCurrent || step.isSelected ? 28 : step.isCompleted ? 22 : 20,
+                      width: 28,
+                      height: 28,
                       borderRadius: '50%',
                       backgroundColor: 'background.paper',
                       zIndex: 0,
@@ -262,39 +277,76 @@ export const Timeline: React.FC<TimelineProps> = ({ metadata, isRunning }) => {
 
                   {/* Step dot */}
                   {step.isCurrent ? (
-                    <CircularProgress
-                      size={20}
-                      thickness={5}
-                      sx={{
-                        color: 'primary.main',
-                        position: 'relative',
-                        zIndex: 1,
-                      }}
-                    />
-                  ) : (
                     <Box
-                      className="step-dot"
                       sx={{
-                        width: step.isSelected ? 20 : step.isCompleted ? 14 : 12,
-                        height: step.isSelected ? 20 : step.isCompleted ? 14 : 12,
-                        borderRadius: '50%',
-                        // Always keep steps in primary color (blue)
-                        backgroundColor: step.isCompleted
-                          ? 'primary.main' // Blue for completed steps
-                          : (theme) => theme.palette.mode === 'dark' ? 'grey.800' : 'grey.300', // Light grey for future steps
+                        position: 'relative',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        transition: 'all 0.2s ease',
-                        boxShadow: step.isCompleted || step.isSelected
-                          ? step.isSelected
-                            ? '0 0 8px rgba(255, 167, 38, 0.5)'
-                            : '0 2px 4px rgba(0,0,0,0.1)'
-                          : 'none',
-                        position: 'relative',
                         zIndex: 1,
                       }}
-                    />
+                    >
+                      <CircularProgress
+                        size={20}
+                        thickness={5}
+                        sx={{
+                          color: 'primary.main',
+                          position: 'absolute',
+                        }}
+                      />
+                      <Box
+                        sx={{
+                          width: 8,
+                          height: 8,
+                          borderRadius: '50%',
+                          backgroundColor: 'white',
+                          position: 'absolute',
+                          pointerEvents: 'none',
+                          boxShadow: '0 0 4px rgba(0,0,0,0.2)',
+                        }}
+                      />
+                    </Box>
+                  ) : (
+                    <Box
+                      sx={{
+                        position: 'relative',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 1,
+                      }}
+                    >
+                      <Box
+                        className="step-dot"
+                        sx={{
+                          width: step.isSelected ? 20 : step.isCompleted ? 14 : 12,
+                          height: step.isSelected ? 20 : step.isCompleted ? 14 : 12,
+                          borderRadius: '50%',
+                          // Always keep steps in primary color (blue)
+                          backgroundColor: step.isCompleted
+                            ? 'primary.main' // Blue for completed steps
+                            : (theme) => theme.palette.mode === 'dark' ? 'grey.800' : 'grey.300', // Light grey for future steps
+                          transition: 'all 0.2s ease',
+                          boxShadow: step.isCompleted || step.isSelected
+                            ? step.isSelected
+                              ? '0 0 8px rgba(255, 167, 38, 0.5)'
+                              : '0 2px 4px rgba(0,0,0,0.1)'
+                            : 'none',
+                        }}
+                      />
+                      {/* White dot for selected step */}
+                      {step.isSelected && (
+                        <Box
+                          sx={{
+                            width: 8,
+                            height: 8,
+                            borderRadius: '50%',
+                            backgroundColor: 'white',
+                            position: 'absolute',
+                          }}
+                        />
+                      )}
+                    </Box>
                   )}
                 </Box>
 
@@ -303,13 +355,14 @@ export const Timeline: React.FC<TimelineProps> = ({ metadata, isRunning }) => {
                   variant="caption"
                   sx={{
                     fontSize: '0.7rem',
-                    fontWeight: step.isCompleted || step.isCurrent || step.isSelected ? 700 : 400,
+                    fontWeight: step.isSelected || step.isCurrent ? 900 : 400,
                     color: step.isCurrent
                       ? 'primary.main'
                       : (step.isCompleted || step.isSelected
                         ? 'text.primary'
                         : (theme) => theme.palette.mode === 'dark' ? 'grey.700' : 'grey.400'),
                     whiteSpace: 'nowrap',
+                    lineHeight: 1,
                   }}
                 >
                   {step.stepNumber}
@@ -326,7 +379,7 @@ export const Timeline: React.FC<TimelineProps> = ({ metadata, isRunning }) => {
                 flexDirection: 'column',
                 alignItems: 'center',
                 gap: 0.75,
-                minWidth: 50,
+                minWidth: 40,
                 flexShrink: 0,
                 position: 'relative',
                 zIndex: 1,
@@ -345,14 +398,16 @@ export const Timeline: React.FC<TimelineProps> = ({ metadata, isRunning }) => {
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
+                  height: 28,
+                  width: 28,
                 }}
               >
                 {/* White background to hide the line */}
                 <Box
                   sx={{
                     position: 'absolute',
-                    width: selectedStepIndex === null ? 32 : 28,
-                    height: selectedStepIndex === null ? 32 : 28,
+                    width: 28,
+                    height: 28,
                     borderRadius: '50%',
                     backgroundColor: 'background.paper',
                     zIndex: 0,
@@ -363,10 +418,13 @@ export const Timeline: React.FC<TimelineProps> = ({ metadata, isRunning }) => {
                 <Box
                   className="final-step-icon"
                   sx={{
-                    width: selectedStepIndex === null ? 24 : 20,
-                    height: selectedStepIndex === null ? 24 : 20,
+                    width: selectedStepIndex === null ? 20 : 18,
+                    height: selectedStepIndex === null ? 20 : 18,
                     borderRadius: '50%',
-                    backgroundColor: finalStep.type === 'success' ? 'success.main' : 'error.main',
+                    backgroundColor:
+                      finalStep.type === 'success' ? 'success.main' :
+                      finalStep.type === 'stopped' || finalStep.type === 'max_steps_reached' ? 'warning.main' :
+                      'error.main',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -374,7 +432,9 @@ export const Timeline: React.FC<TimelineProps> = ({ metadata, isRunning }) => {
                     boxShadow: selectedStepIndex === null
                       ? finalStep.type === 'success'
                         ? '0 2px 8px rgba(102, 187, 106, 0.4)'
-                        : '0 2px 8px rgba(244, 67, 54, 0.4)'
+                        : finalStep.type === 'stopped' || finalStep.type === 'max_steps_reached'
+                          ? '0 2px 8px rgba(255, 152, 0, 0.4)'
+                          : '0 2px 8px rgba(244, 67, 54, 0.4)'
                       : '0 2px 4px rgba(0,0,0,0.1)',
                     position: 'relative',
                     zIndex: 1,
@@ -382,6 +442,12 @@ export const Timeline: React.FC<TimelineProps> = ({ metadata, isRunning }) => {
                 >
                   {finalStep.type === 'success' ? (
                     <CheckIcon sx={{ fontSize: 14, color: 'white' }} />
+                  ) : finalStep.type === 'stopped' ? (
+                    <StopCircleIcon sx={{ fontSize: 14, color: 'white' }} />
+                  ) : finalStep.type === 'max_steps_reached' ? (
+                    <HourglassEmptyIcon sx={{ fontSize: 14, color: 'white' }} />
+                  ) : finalStep.type === 'sandbox_timeout' ? (
+                    <AccessTimeIcon sx={{ fontSize: 14, color: 'white' }} />
                   ) : (
                     <CloseIcon sx={{ fontSize: 14, color: 'white' }} />
                   )}
@@ -394,13 +460,20 @@ export const Timeline: React.FC<TimelineProps> = ({ metadata, isRunning }) => {
                 sx={{
                   fontSize: '0.7rem',
                   fontWeight: selectedStepIndex === null ? 700 : 500,
-                  color: finalStep.type === 'success'
-                    ? (selectedStepIndex === null ? 'text.primary' : 'text.secondary')
-                    : 'error.main',
+                  color:
+                    finalStep.type === 'success'
+                      ? (selectedStepIndex === null ? 'text.primary' : 'text.secondary')
+                      : finalStep.type === 'stopped' || finalStep.type === 'max_steps_reached'
+                        ? 'warning.main'
+                        : 'error.main',
                   whiteSpace: 'nowrap',
                 }}
               >
-                {finalStep.type === 'success' ? 'End' : 'Failed'}
+                {finalStep.type === 'success' ? 'End' :
+                 finalStep.type === 'stopped' ? 'Stopped' :
+                 finalStep.type === 'max_steps_reached' ? 'Max Steps' :
+                 finalStep.type === 'sandbox_timeout' ? 'Timeout' :
+                 'Failed'}
               </Typography>
             </Box>
               )}

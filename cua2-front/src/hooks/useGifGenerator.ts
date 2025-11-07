@@ -44,12 +44,10 @@ export const useGifGenerator = ({
         return;
       }
 
-      // Generate GIF with maximum dimensions of 400x200
+      // Generate GIF with original image dimensions
       const options: GifGenerationOptions = {
         images,
         interval: 1.5, // 1.5 seconds per frame
-        gifWidth: 400,
-        gifHeight: 200,
         quality: 10, // Medium quality for good size/quality compromise
       };
 
