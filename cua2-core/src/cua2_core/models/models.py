@@ -126,6 +126,10 @@ class AgentTraceMetadata(BaseModel):
     numberOfSteps: int = 0
     maxSteps: int = 0
     completed: bool = False
+    final_state: (
+        Literal["success", "stopped", "max_steps_reached", "error", "sandbox_timeout"]
+        | None
+    ) = None
 
 
 class AgentTrace(BaseModel):
@@ -157,6 +161,7 @@ class AgentStartEvent(BaseModel):
 
     type: Literal["agent_start"] = "agent_start"
     agentTrace: AgentTrace
+    status: Literal["max_sandboxes_reached", "success"] = "success"
 
 
 class AgentProgressEvent(BaseModel):
@@ -172,7 +177,9 @@ class AgentCompleteEvent(BaseModel):
 
     type: Literal["agent_complete"] = "agent_complete"
     traceMetadata: AgentTraceMetadata
-    final_state: Literal["success", "stopped", "max_steps_reached", "error"]
+    final_state: Literal[
+        "success", "stopped", "max_steps_reached", "error", "sandbox_timeout"
+    ]
 
 
 class AgentErrorEvent(BaseModel):
@@ -292,6 +299,10 @@ class ActiveTask(BaseModel):
         step_duration: float | None = None,
         step_numberOfSteps: int | None = None,
         completed: bool | None = None,
+        final_state: Literal[
+            "success", "stopped", "max_steps_reached", "error", "sandbox_timeout"
+        ]
+        | None = None,
     ):
         """Update trace metadata"""
         with self._file_lock:
@@ -305,6 +316,8 @@ class ActiveTask(BaseModel):
                 self.traceMetadata.numberOfSteps += step_numberOfSteps
             if completed is not None:
                 self.traceMetadata.completed = completed
+            if final_state is not None:
+                self.traceMetadata.final_state = final_state
 
 
 #################### API Routes Models ########################

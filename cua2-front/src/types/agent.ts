@@ -35,6 +35,7 @@ export interface AgentTraceMetadata {
   numberOfSteps: number;
   maxSteps: number;
   completed: boolean;
+  final_state: 'success' | 'stopped' | 'max_steps_reached' | 'error' | 'sandbox_timeout' | null;
 }
 
 export interface FinalStep {
@@ -48,6 +49,7 @@ export interface FinalStep {
 interface AgentStartEvent {
   type: 'agent_start';
   agentTrace: AgentTrace;
+  status: 'max_sandboxes_reached' | 'success';
 }
 
 interface AgentProgressEvent {
@@ -59,7 +61,7 @@ interface AgentProgressEvent {
 interface AgentCompleteEvent {
   type: 'agent_complete';
   traceMetadata: AgentTraceMetadata;
-  final_state: 'success' | 'stopped' | 'max_steps_reached' | 'error';
+  final_state: 'success' | 'stopped' | 'max_steps_reached' | 'error' | 'sandbox_timeout';
 }
 
 interface AgentErrorEvent {
