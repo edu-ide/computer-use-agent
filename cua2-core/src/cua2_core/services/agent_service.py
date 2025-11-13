@@ -6,6 +6,7 @@ import os
 import time
 from io import BytesIO
 from typing import Callable, Literal
+from uuid import uuid4
 
 from cua2_core.models.models import (
     ActiveTask,
@@ -17,12 +18,14 @@ from cua2_core.models.models import (
 from cua2_core.services.agent_utils.desktop_agent import E2BVisionAgent
 from cua2_core.services.agent_utils.function_parser import parse_function_call
 from cua2_core.services.agent_utils.get_model import get_model
+from cua2_core.services.archival_service import ArchivalService
 from cua2_core.services.sandbox_service import SandboxService
 from cua2_core.websocket.websocket_manager import WebSocketException, WebSocketManager
 from e2b_desktop import Sandbox, TimeoutException
 from fastapi import WebSocket
 from PIL import Image
 from smolagents import ActionStep, AgentImage, AgentMaxStepsError, TaskStep
+from starlette.websockets import WebSocketState
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +53,35 @@ class AgentService:
         self._lock = asyncio.Lock()
         self.max_sandboxes = int(600 / num_workers)
 
+        # Initialize archival service in dedicated process
+        self.archival_service = ArchivalService(
+            hf_token=os.getenv("HF_TOKEN"),
+            hf_dataset_repo="smolagents/cua_traces",
+            data_dir="data",
+            archive_interval_minutes=30,
+            folder_age_threshold_minutes=30,
+        )
+        # Start the archival service process
+        self.archival_service.start()
+
+    def _update_archival_active_tasks(self):
+        """
+        Update the archival service with current active task IDs.
+        Should be called whenever tasks are added or removed.
+        """
+        if self.archival_service.is_alive():
+            self.archival_service.update_active_tasks(set(self.active_tasks.keys()))
+
+    async def create_id_and_sandbox(self, websocket: WebSocket) -> str:
+        """Create a new ID and sandbox"""
+        async with self._lock:
+            uuid = str(uuid4())
+            while uuid in self.active_tasks:
+                uuid = str(uuid4())
+            self.task_websockets[uuid] = websocket
+        await self.sandbox_service.acquire_sandbox(uuid)
+        return uuid
+
     async def process_user_task(
         self, trace: AgentTrace, websocket: WebSocket
     ) -> str | None:
@@ -60,6 +92,9 @@ class AgentService:
         trace.traceMetadata = AgentTraceMetadata(traceId=trace_id)
 
         async with self._lock:
+            if self.task_websockets[trace_id] != websocket:
+                raise WebSocketException("WebSocket mismatch")
+
             active_task = ActiveTask(
                 message_id=trace_id,
                 instruction=trace.instruction,
@@ -79,8 +114,10 @@ class AgentService:
 
             # Store the task and websocket for this task
             self.active_tasks[trace_id] = active_task
-            self.task_websockets[trace_id] = websocket
             self.last_screenshot[trace_id] = None
+
+        # Update archival service with new active task
+        self._update_archival_active_tasks()
 
         asyncio.create_task(self._agent_processing(trace_id))
 
@@ -111,8 +148,15 @@ class AgentService:
 
             model = get_model(self.active_tasks[message_id].model_id)
 
-            # Acquire a sandbox from the pool
-            sandbox = await self.sandbox_service.acquire_sandbox(message_id)
+            max_attempts = 10
+            for _ in range(max_attempts):
+                response = await self.sandbox_service.acquire_sandbox(message_id)
+                if response.sandbox is not None and response.state == "ready":
+                    sandbox = response.sandbox
+                    break
+                elif response.state == "max_sandboxes_reached":
+                    raise Exception("No sandbox available: pool limit reached")
+                await asyncio.sleep(2)
             if sandbox is None:
                 raise Exception("No sandbox available: pool limit reached")
 
@@ -180,7 +224,12 @@ class AgentService:
 
         finally:
             # Send completion event
-            if not websocket_exception:
+            # Check if websocket is still connected before sending
+            if (
+                not websocket_exception
+                and websocket
+                and websocket.client_state == WebSocketState.CONNECTED
+            ):
                 await self.websocket_manager.send_agent_complete(
                     metadata=self.active_tasks[message_id].traceMetadata,
                     websocket=websocket,
@@ -210,9 +259,12 @@ class AgentService:
                 if message_id in self.last_screenshot:
                     del self.last_screenshot[message_id]
 
+            # Update archival service after task removal
+            self._update_archival_active_tasks()
+
             # Release sandbox back to the pool
             if sandbox:
-                await self.sandbox_service.release_sandbox(sandbox)
+                await self.sandbox_service.release_sandbox(message_id)
 
     async def _agent_processing(
         self,
@@ -236,24 +288,8 @@ class AgentService:
             if memory_step.step_number > agent.max_steps:
                 raise AgentStopException("Max steps reached")
 
-            time.sleep(3)
-
-            image = self.last_screenshot[message_id]
-            assert image is not None
-
-            for previous_memory_step in (
-                agent.memory.steps
-            ):  # Remove previous screenshots from logs for lean processing
-                if (
-                    isinstance(previous_memory_step, ActionStep)
-                    and previous_memory_step.step_number is not None
-                    and previous_memory_step.step_number <= memory_step.step_number - 1
-                ):
-                    previous_memory_step.observations_images = None
-                elif isinstance(previous_memory_step, TaskStep):
-                    previous_memory_step.task_images = None
-
-            memory_step.observations_images = [image.copy()]
+            if self.active_tasks[message_id].traceMetadata.completed:
+                raise AgentStopException("Task not completed")
 
             model_output = (
                 memory_step.model_output_message.content
@@ -280,6 +316,35 @@ class AgentService:
                     """The task failed due to an error"""  # TODO: To Handle in front
                 )
 
+            agent_actions = (
+                AgentAction.from_function_calls(parse_function_call(action_sequence))
+                if action_sequence
+                else None
+            )
+
+            if not (
+                agent_actions is not None
+                and any(action.function_name == "wait" for action in agent_actions)
+            ):
+                time.sleep(3)
+
+            image = self.last_screenshot[message_id]
+            assert image is not None
+
+            for previous_memory_step in (
+                agent.memory.steps
+            ):  # Remove previous screenshots from logs for lean processing
+                if (
+                    isinstance(previous_memory_step, ActionStep)
+                    and previous_memory_step.step_number is not None
+                    and previous_memory_step.step_number <= memory_step.step_number - 1
+                ):
+                    previous_memory_step.observations_images = None
+                elif isinstance(previous_memory_step, TaskStep):
+                    previous_memory_step.task_images = None
+
+            memory_step.observations_images = [image.copy()]
+
             if memory_step.observations_images:
                 image = memory_step.observations_images[0]
                 buffered = BytesIO()
@@ -295,11 +360,7 @@ class AgentService:
                 stepId=str(memory_step.step_number),
                 image=image_base64,
                 thought=thought,
-                actions=AgentAction.from_function_calls(
-                    parse_function_call(action_sequence)
-                )
-                if action_sequence
-                else None,
+                actions=agent_actions,
                 error=memory_step.error.message if memory_step.error else None,
                 duration=memory_step.timing.duration,
                 inputTokensUsed=memory_step.token_usage.input_tokens,
@@ -317,15 +378,16 @@ class AgentService:
             self.active_tasks[message_id].update_step(step)
 
             websocket = self.task_websockets.get(message_id)
-            future = asyncio.run_coroutine_threadsafe(
-                self.websocket_manager.send_agent_progress(
-                    step=step,
-                    metadata=self.active_tasks[message_id].traceMetadata,
-                    websocket=websocket,
-                ),
-                loop,
-            )
-            future.result()
+            if websocket and websocket.client_state == WebSocketState.CONNECTED:
+                future = asyncio.run_coroutine_threadsafe(
+                    self.websocket_manager.send_agent_progress(
+                        step=step,
+                        metadata=self.active_tasks[message_id].traceMetadata,
+                        websocket=websocket,
+                    ),
+                    loop,
+                )
+                future.result()
 
             if self.active_tasks[message_id].traceMetadata.completed:
                 raise AgentStopException("Task not completed")
@@ -419,3 +481,40 @@ class AgentService:
             self.active_tasks[trace_id].update_trace_metadata(
                 completed=True,
             )
+
+    async def cleanup_tasks_for_websocket(self, websocket: WebSocket):
+        """
+        Clean up all tasks associated with a disconnected websocket.
+        This will stop the tasks and release their sandboxes.
+        """
+        tasks_to_cleanup = []
+
+        # Find all message_ids associated with this websocket
+        async with self._lock:
+            for message_id, ws in list(self.task_websockets.items()):
+                if ws == websocket:
+                    tasks_to_cleanup.append(message_id)
+                    logger.info(
+                        f"Marking task {message_id} for cleanup due to websocket disconnect"
+                    )
+
+        # Cleanup each task
+        for message_id in tasks_to_cleanup:
+            try:
+                # Mark task as completed to stop the agent
+                if message_id in self.active_tasks:
+                    self.active_tasks[message_id].update_trace_metadata(
+                        completed=True,
+                    )
+                    logger.info(
+                        f"Stopped task {message_id} due to websocket disconnect"
+                    )
+
+                # Release the sandbox immediately
+                await self.sandbox_service.release_sandbox(message_id)
+                logger.info(
+                    f"Released sandbox for task {message_id} due to websocket disconnect"
+                )
+
+            except Exception as e:
+                logger.error(f"Error cleaning up task {message_id}: {e}", exc_info=True)

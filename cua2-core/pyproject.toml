@@ -36,6 +36,7 @@ dependencies = [
     "smolagents[openai,litellm]==1.22.0",
     "openai==2.6.1",
     "e2b-desktop==2.1.0",
+    "huggingface_hub==1.1.2",
 ]
 
 [project.optional-dependencies]

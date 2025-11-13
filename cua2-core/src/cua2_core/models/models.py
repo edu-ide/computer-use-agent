@@ -3,6 +3,7 @@ import os
 import threading
 from datetime import datetime
 from typing import Annotated, Literal, Optional
+from uuid import uuid4
 
 from cua2_core.services.agent_utils.function_parser import FunctionCall
 from pydantic import BaseModel, Field, PrivateAttr, field_serializer, model_validator
@@ -106,6 +107,15 @@ class AgentStep(BaseModel):
     thought: Optional[str] = None
     actions: list[AgentAction] = []
 
+    @field_serializer("image")
+    def serialize_image(self, image: str, _info):
+        """Convert image to path when dumping to JSON"""
+
+        if _info.context and _info.context.get("image_as_path", True):
+            return f"{self.traceId}-{self.stepId}.png"
+
+        return image
+
     @field_serializer("actions")
     def serialize_actions(self, actions: list[AgentAction], _info):
         """Convert actions to list of strings when dumping (controlled by context)"""
@@ -206,6 +216,7 @@ class HeartbeatEvent(BaseModel):
     """Heartbeat event"""
 
     type: Literal["heartbeat"] = "heartbeat"
+    uuid: str = Field(default_factory=lambda: str(uuid4()))
 
 
 WebSocketEvent: TypeAlias = Annotated[
@@ -266,7 +277,7 @@ class ActiveTask(BaseModel):
                     self.model_dump(
                         mode="json",
                         exclude={"_file_locks"},
-                        context={"actions_as_json": True},
+                        context={"actions_as_json": True, "image_as_path": True},
                     ),
                     f,
                     indent=2,
@@ -286,7 +297,7 @@ class ActiveTask(BaseModel):
                     self.model_dump(
                         mode="json",
                         exclude={"_file_locks"},
-                        context={"actions_as_json": True},
+                        context={"actions_as_json": True, "image_as_path": True},
                     ),
                     f,
                     indent=2,

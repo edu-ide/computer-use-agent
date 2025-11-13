@@ -93,7 +93,33 @@ cp env.example .env
 Edit `.env` with your configuration:
 - API keys for OpenAI/LiteLLM
 - Database connections (if applicable)
+- HuggingFace credentials for data archival (optional)
 - Other service credentials
+
+#### Data Archival Configuration (Optional)
+
+CUA2 includes an automatic data archival feature that backs up old trace data to HuggingFace datasets:
+
+```bash
+# HuggingFace token for uploading archived data
+HF_TOKEN=your_huggingface_token_here
+
+# HuggingFace dataset repository ID (e.g., "username/dataset-name")
+HF_DATASET_REPO=your_username/your_dataset_repo
+
+# Check interval (default: 30 minutes)
+ARCHIVE_INTERVAL_MINUTES=30
+
+# Age threshold - folders older than this will be archived (default: 30 minutes)
+FOLDER_AGE_THRESHOLD_MINUTES=30
+```
+
+**How it works:**
+1. Every 30 minutes (configurable), the system checks the `data/` folder for trace folders
+2. Folders older than 30 minutes (configurable) are compressed into `.tar.gz` archives
+3. Archives are uploaded to your HuggingFace dataset repository
+4. After verifying successful upload, local folders are deleted to free up space
+5. This keeps your disk usage minimal while preserving all agent traces in the cloud
 
 ### 4. Start Development Servers
 

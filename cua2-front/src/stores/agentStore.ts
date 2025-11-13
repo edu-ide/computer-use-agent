@@ -5,6 +5,7 @@ import { devtools } from 'zustand/middleware';
 interface AgentState {
   // State
   trace?: AgentTrace;
+  traceId: string | null; // Set by backend heartbeat, persists during connection
   isAgentProcessing: boolean;
   isConnectingToE2B: boolean; // New state for E2B connection
   vncUrl: string;
@@ -19,6 +20,7 @@ interface AgentState {
 
   // Actions
   setTrace: (trace: AgentTrace | undefined) => void;
+  setTraceId: (traceId: string | null) => void;
   updateTraceWithStep: (step: AgentStep, metadata: AgentTraceMetadata) => void;
   completeTrace: (metadata: AgentTraceMetadata, finalState?: 'success' | 'stopped' | 'max_steps_reached' | 'error' | 'sandbox_timeout') => void;
   setIsAgentProcessing: (processing: boolean) => void;
@@ -36,6 +38,7 @@ interface AgentState {
 
 const initialState = {
   trace: undefined,
+  traceId: null, // Will be set by backend heartbeat
   isAgentProcessing: false,
   isConnectingToE2B: false,
   vncUrl: '',
@@ -57,6 +60,10 @@ export const useAgentStore = create<AgentState>()(
       // Set the complete trace
       setTrace: (trace) =>
         set({ trace }, false, 'setTrace'),
+
+      // Set trace ID (set by backend heartbeat, only cleared on disconnect)
+      setTraceId: (traceId) =>
+        set({ traceId }, false, 'setTraceId'),
 
       // Update trace with a new step
       updateTraceWithStep: (step, metadata) =>
@@ -90,62 +97,62 @@ export const useAgentStore = create<AgentState>()(
           'updateTraceWithStep'
         ),
 
-  // Complete the trace
-  completeTrace: (metadata, finalState?: 'success' | 'stopped' | 'max_steps_reached' | 'error' | 'sandbox_timeout') =>
-    set(
-      (state) => {
-        if (!state.trace) return state;
+      // Complete the trace
+      completeTrace: (metadata, finalState?: 'success' | 'stopped' | 'max_steps_reached' | 'error' | 'sandbox_timeout') =>
+        set(
+          (state) => {
+            if (!state.trace) return state;
 
-        // Preserve existing maxSteps if new metadata has 0
-        const updatedMetadata = {
-          ...metadata,
-          maxSteps: metadata.maxSteps > 0
-            ? metadata.maxSteps
-            : (state.trace.traceMetadata?.maxSteps || 200),
-          completed: true,
-        };
+            // Preserve existing maxSteps if new metadata has 0
+            const updatedMetadata = {
+              ...metadata,
+              maxSteps: metadata.maxSteps > 0
+                ? metadata.maxSteps
+                : (state.trace.traceMetadata?.maxSteps || 200),
+              completed: true,
+            };
 
-        // Determine the final step type based on final_state from backend
-        let stepType: 'success' | 'failure' | 'stopped' | 'max_steps_reached' | 'sandbox_timeout';
-        let stepMessage: string | undefined;
+            // Determine the final step type based on final_state from backend
+            let stepType: 'success' | 'failure' | 'stopped' | 'max_steps_reached' | 'sandbox_timeout';
+            let stepMessage: string | undefined;
 
-        if (finalState === 'stopped') {
-          stepType = 'stopped';
-          stepMessage = 'Task stopped by user';
-        } else if (finalState === 'max_steps_reached') {
-          stepType = 'max_steps_reached';
-          stepMessage = 'Maximum steps reached';
-        } else if (finalState === 'sandbox_timeout') {
-          stepType = 'sandbox_timeout';
-          stepMessage = 'Sandbox timeout';
-        } else if (finalState === 'error' || state.error) {
-          stepType = 'failure';
-          stepMessage = state.error || 'Task failed';
-        } else {
-          stepType = 'success';
-          stepMessage = undefined;
-        }
+            if (finalState === 'stopped') {
+              stepType = 'stopped';
+              stepMessage = 'Task stopped by user';
+            } else if (finalState === 'max_steps_reached') {
+              stepType = 'max_steps_reached';
+              stepMessage = 'Maximum steps reached';
+            } else if (finalState === 'sandbox_timeout') {
+              stepType = 'sandbox_timeout';
+              stepMessage = 'Sandbox timeout';
+            } else if (finalState === 'error' || state.error) {
+              stepType = 'failure';
+              stepMessage = state.error || 'Task failed';
+            } else {
+              stepType = 'success';
+              stepMessage = undefined;
+            }
 
-        const finalStep: FinalStep = {
-          type: stepType,
-          message: stepMessage,
-          metadata: updatedMetadata,
-        };
+            const finalStep: FinalStep = {
+              type: stepType,
+              message: stepMessage,
+              metadata: updatedMetadata,
+            };
 
-        return {
-          trace: {
-            ...state.trace,
-            isRunning: false,
-            traceMetadata: updatedMetadata,
+            return {
+              trace: {
+                ...state.trace,
+                isRunning: false,
+                traceMetadata: updatedMetadata,
+              },
+              finalStep,
+              // Keep error in state for display
+              selectedStepIndex: null, // Reset to live mode on completion
+            };
           },
-          finalStep,
-          // Keep error in state for display
-          selectedStepIndex: null, // Reset to live mode on completion
-        };
-      },
-      false,
-      'completeTrace'
-    ),
+          false,
+          'completeTrace'
+        ),
 
       // Set processing state
       setIsAgentProcessing: (isAgentProcessing) =>
@@ -227,10 +234,11 @@ export const useAgentStore = create<AgentState>()(
       toggleDarkMode: () =>
         set((state) => ({ isDarkMode: !state.isDarkMode }), false, 'toggleDarkMode'),
 
-      // Reset agent state
+      // Reset agent state (but preserve traceId from backend during connection)
       resetAgent: () =>
         set((state) => ({
           ...initialState,
+          traceId: state.traceId,  // IMPORTANT: Keep traceId from backend
           isDarkMode: state.isDarkMode,  // Keep dark mode preference
           isConnected: state.isConnected,  // Keep connection status
           selectedModelId: state.selectedModelId,  // Keep selected model
@@ -244,6 +252,7 @@ export const useAgentStore = create<AgentState>()(
 
 // Selectors for better performance
 export const selectTrace = (state: AgentState) => state.trace;
+export const selectTraceId = (state: AgentState) => state.traceId;
 export const selectIsAgentProcessing = (state: AgentState) => state.isAgentProcessing;
 export const selectIsConnectingToE2B = (state: AgentState) => state.isConnectingToE2B;
 export const selectVncUrl = (state: AgentState) => state.vncUrl;

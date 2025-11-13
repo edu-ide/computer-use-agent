@@ -1,8 +1,8 @@
-import React, { useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useAgentStore, selectTrace, selectIsAgentProcessing, selectVncUrl, selectMetadata, selectSelectedStep } from '@/stores/agentStore';
 import { Header, SandboxViewer, StepsList, Timeline } from '@/components';
+import { selectIsAgentProcessing, selectMetadata, selectSelectedStep, selectTrace, selectVncUrl, useAgentStore } from '@/stores/agentStore';
 import { Box } from '@mui/material';
+import { useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 const Task = () => {
   const navigate = useNavigate();
@@ -25,8 +25,19 @@ const Task = () => {
 
   // Handler for going back to home
   const handleBackToHome = () => {
+    const currentTrace = useAgentStore.getState().trace;
+
+    // Stop the current task if it's running
+    const stopTask = (window as Window & { __stopCurrentTask?: () => void }).__stopCurrentTask;
+    if (stopTask) {
+      stopTask();
+    }
+
+    // Reset frontend state
     useAgentStore.getState().resetAgent();
-    navigate('/');
+
+    // Reload the page to reconnect websocket
+    window.location.href = '/';
   };
 
   // Determine if we should show success/fail status (same logic as SandboxViewer)
@@ -66,15 +77,15 @@ const Task = () => {
           overflowX: 'hidden',
         }}
       >
-      <Box
-        sx={{
-          width: '100%',
-          display: 'flex',
-          flexDirection: { xs: 'column', md: 'row' },
-          p: { xs: 2, md: 4 },
-          pb: { xs: 2, md: 3 },
-        }}
-      >
+        <Box
+          sx={{
+            width: '100%',
+            display: 'flex',
+            flexDirection: { xs: 'column', md: 'row' },
+            p: { xs: 2, md: 4 },
+            pb: { xs: 2, md: 3 },
+          }}
+        >
           {/* Left Side: OS Stream + Metadata */}
           <Box
             sx={{
