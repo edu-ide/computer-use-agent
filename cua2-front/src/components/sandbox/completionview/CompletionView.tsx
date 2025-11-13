@@ -1,18 +1,18 @@
-import React from 'react';
-import { Box, Typography, Button, Divider, Alert, Paper } from '@mui/material';
-import CheckIcon from '@mui/icons-material/Check';
-import CloseIcon from '@mui/icons-material/Close';
-import StopCircleIcon from '@mui/icons-material/StopCircle';
-import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
+import { AgentStep, AgentTrace, FinalStep } from '@/types/agent';
+import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import AddIcon from '@mui/icons-material/Add';
-import SmartToyIcon from '@mui/icons-material/SmartToy';
 import AssignmentIcon from '@mui/icons-material/Assignment';
 import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline';
-import AccessTimeIcon from '@mui/icons-material/AccessTime';
+import CheckIcon from '@mui/icons-material/Check';
+import CloseIcon from '@mui/icons-material/Close';
+import FormatListNumberedIcon from '@mui/icons-material/FormatListNumbered';
+import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
 import InputIcon from '@mui/icons-material/Input';
 import OutputIcon from '@mui/icons-material/Output';
-import FormatListNumberedIcon from '@mui/icons-material/FormatListNumbered';
-import { FinalStep, AgentTrace, AgentStep } from '@/types/agent';
+import SmartToyIcon from '@mui/icons-material/SmartToy';
+import StopCircleIcon from '@mui/icons-material/StopCircle';
+import { Alert, Box, Button, Divider, Paper, Typography } from '@mui/material';
+import React from 'react';
 import { DownloadGifButton } from './DownloadGifButton';
 import { DownloadJsonButton } from './DownloadJsonButton';
 
@@ -65,14 +65,14 @@ export const CompletionView: React.FC<CompletionViewProps> = ({
       case 'sandbox_timeout':
         return {
           icon: <AccessTimeIcon sx={{ fontSize: 28 }} />,
-          title: 'Sandbox Timeout',
+          title: 'Max Sandbox Time Reached',
           color: 'error.main',
         };
       case 'failure':
       default:
         return {
           icon: <CloseIcon sx={{ fontSize: 28 }} />,
-          title: 'Task Failed',
+          title: 'Task Failed (Agent Internal Error)',
           color: 'error.main',
         };
     }

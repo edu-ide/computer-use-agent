@@ -21,8 +21,9 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket_manager.connect(websocket)
 
     try:
-        # Send welcome heartbeat
-        welcome_message = HeartbeatEvent(type="heartbeat")
+        welcome_message = HeartbeatEvent(
+            uuid=await agent_service.create_id_and_sandbox(websocket)
+        )
         await websocket_manager.send_message(welcome_message, websocket)
 
         # Keep the connection alive and wait for messages
@@ -100,5 +101,11 @@ async def websocket_endpoint(websocket: WebSocket):
     except Exception as e:
         print(f"WebSocket connection error: {e}")
     finally:
+        # Cleanup tasks and sandboxes associated with this websocket
+        try:
+            await agent_service.cleanup_tasks_for_websocket(websocket)
+        except Exception as e:
+            print(f"Error cleaning up tasks for websocket: {e}")
+
         # Ensure cleanup happens
         websocket_manager.disconnect(websocket)

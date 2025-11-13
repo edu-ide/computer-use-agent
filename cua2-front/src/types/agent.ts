@@ -80,6 +80,7 @@ interface VncUrlUnsetEvent {
 
 interface HeartbeatEvent {
   type: 'heartbeat';
+  uuid: string;
 }
 
 export type WebSocketEvent =

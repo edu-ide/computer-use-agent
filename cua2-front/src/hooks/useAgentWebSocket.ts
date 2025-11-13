@@ -1,8 +1,7 @@
+import { useAgentStore } from '@/stores/agentStore';
+import { AgentTrace, AgentTraceMetadata, WebSocketEvent } from '@/types/agent';
 import { useCallback, useEffect } from 'react';
 import { useWebSocket } from './useWebSocket';
-import { useAgentStore } from '@/stores/agentStore';
-import { WebSocketEvent, AgentTrace, AgentStep } from '@/types/agent';
-import { ulid } from 'ulid';
 
 interface UseAgentWebSocketOptions {
   url: string;
@@ -11,6 +10,8 @@ interface UseAgentWebSocketOptions {
 export const useAgentWebSocket = ({ url }: UseAgentWebSocketOptions) => {
   const {
     setTrace,
+    traceId,
+    setTraceId,
     updateTraceWithStep,
     completeTrace,
     setIsAgentProcessing,
@@ -52,6 +53,7 @@ export const useAgentWebSocket = ({ url }: UseAgentWebSocketOptions) => {
               numberOfSteps: 0,
               maxSteps: 200,
               completed: false,
+              final_state: null,
             },
           };
 
@@ -94,10 +96,13 @@ export const useAgentWebSocket = ({ url }: UseAgentWebSocketOptions) => {
 
         case 'heartbeat':
           console.log('Heartbeat received:', event);
+          setTraceId(event.uuid);
+          console.log('TraceId set from backend:', event.uuid);
           break;
+
       }
     },
-    [setTrace, updateTraceWithStep, completeTrace, setIsAgentProcessing, setIsConnectingToE2B, setVncUrl, setError, resetAgent]
+    [setTrace, updateTraceWithStep, completeTrace, setIsAgentProcessing, setIsConnectingToE2B, setVncUrl, setError, resetAgent, setTraceId, traceId]
   );
 
   // Handle WebSocket errors
@@ -113,10 +118,16 @@ export const useAgentWebSocket = ({ url }: UseAgentWebSocketOptions) => {
     onError: handleWebSocketError,
   });
 
-  // Sync connection state to store
+  // Sync connection state to store and clear traceId on disconnect
   useEffect(() => {
     setIsConnected(isConnected);
-  }, [isConnected, setIsConnected]);
+
+    // Clear traceId when websocket disconnects
+    if (!isConnected) {
+      setTraceId(null);
+      console.log('WebSocket disconnected - traceId cleared');
+    }
+  }, [isConnected, setIsConnected, setTraceId]);
 
   // Create a global sendNewTask function that can be called from anywhere
   useEffect(() => {
@@ -125,7 +136,13 @@ export const useAgentWebSocket = ({ url }: UseAgentWebSocketOptions) => {
       // Reset agent state before starting a new task
       resetAgent();
 
-      const traceId = ulid();
+      // Ensure traceId is set before creating trace
+      if (!traceId) {
+        console.error('Internal error: Cannot send task. TraceId not set. Refreshing page...');
+        window.location.reload();
+        return;
+      }
+
       const trace: AgentTrace = {
         id: traceId,
         instruction,
@@ -140,7 +157,8 @@ export const useAgentWebSocket = ({ url }: UseAgentWebSocketOptions) => {
           numberOfSteps: 0,
           maxSteps: 200, // Default max steps, will be updated by backend
           completed: false,
-        },
+          final_state: null,
+        } as AgentTraceMetadata,
       };
 
       setTrace(trace);
@@ -155,7 +173,7 @@ export const useAgentWebSocket = ({ url }: UseAgentWebSocketOptions) => {
 
       console.log('Task sent:', trace);
     };
-  }, [setTrace, setIsAgentProcessing, setIsConnectingToE2B, sendMessage, resetAgent]);
+  }, [setTrace, setIsAgentProcessing, setIsConnectingToE2B, sendMessage, resetAgent, traceId]);
 
   // Function to stop the current task
   const stopCurrentTask = useCallback(() => {
