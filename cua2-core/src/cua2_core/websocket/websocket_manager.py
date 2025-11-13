@@ -52,7 +52,10 @@ class WebSocketManager:
         try:
             await websocket.send_text(
                 json.dumps(
-                    message.model_dump(mode="json", context={"actions_as_json": True})
+                    message.model_dump(
+                        mode="json",
+                        context={"actions_as_json": True, "image_as_path": False},
+                    )
                 )
             )
         except Exception as e:
