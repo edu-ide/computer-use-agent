@@ -140,6 +140,7 @@ class AgentTraceMetadata(BaseModel):
         Literal["success", "stopped", "max_steps_reached", "error", "sandbox_timeout"]
         | None
     ) = None
+    user_evaluation: Literal["success", "failed", "not_evaluated"] = "not_evaluated"
 
 
 class AgentTrace(BaseModel):
@@ -248,6 +249,14 @@ class StopTask(BaseModel):
     traceId: str
 
 
+class TraceEvaluation(BaseModel):
+    """Trace evaluation message"""
+
+    event_type: Literal["trace_evaluation"]
+    traceId: str
+    user_evaluation: Literal["success", "failed", "not_evaluated"]
+
+
 ##################### Agent Service ########################
 
 
@@ -314,6 +323,7 @@ class ActiveTask(BaseModel):
             "success", "stopped", "max_steps_reached", "error", "sandbox_timeout"
         ]
         | None = None,
+        user_evaluation: Literal["success", "failed", "not_evaluated"] | None = None,
     ):
         """Update trace metadata"""
         with self._file_lock:
@@ -329,6 +339,8 @@ class ActiveTask(BaseModel):
                 self.traceMetadata.completed = completed
             if final_state is not None:
                 self.traceMetadata.final_state = final_state
+            if user_evaluation is not None:
+                self.traceMetadata.user_evaluation = user_evaluation
 
 
 #################### API Routes Models ########################
@@ -364,6 +376,19 @@ class UpdateStepRequest(BaseModel):
 
 class UpdateStepResponse(BaseModel):
     """Response model for step update"""
+
+    success: bool
+    message: str
+
+
+class UpdateTraceEvaluationRequest(BaseModel):
+    """Request model for updating trace evaluation"""
+
+    user_evaluation: Literal["success", "failed", "not_evaluated"]
+
+
+class UpdateTraceEvaluationResponse(BaseModel):
+    """Response model for trace evaluation update"""
 
     success: bool
     message: str

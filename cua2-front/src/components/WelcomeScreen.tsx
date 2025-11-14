@@ -150,13 +150,15 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStartTask, isCon
           Computer Use Agent
         </Typography>
 
-        {/* Powered by smolagents */}
+        {/* Powered by smolagents and E2B */}
         <Box
           sx={{
             display: 'flex',
             alignItems: 'center',
             gap: 1,
             mb: 2,
+            flexWrap: 'wrap',
+            justifyContent: 'center',
           }}
         >
           <Typography
@@ -168,6 +170,8 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStartTask, isCon
           >
             Powered by
           </Typography>
+
+          {/* smolagents link */}
           <Box
             component="a"
             href="https://github.com/huggingface/smolagents"
@@ -239,6 +243,61 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStartTask, isCon
               </Typography>
             </Box>
           </Box>
+
+          {/* Separator */}
+          <Typography
+            variant="body2"
+            sx={{
+              color: 'text.secondary',
+              mx: 0.5,
+            }}
+          >
+            &
+          </Typography>
+
+          {/* E2B link */}
+          <Box
+            component="a"
+            href="https://e2b.dev/"
+            target="_blank"
+            rel="noopener noreferrer"
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 0.75,
+              textDecoration: 'none',
+              transition: 'all 0.2s ease',
+              '&:hover': {
+                '& .e2b-text': {
+                  textDecoration: 'underline',
+                },
+              },
+            }}
+          >
+            {/* E2B Logo */}
+            <Box
+              component="img"
+              src="https://avatars.githubusercontent.com/u/129434473?s=200&v=4"
+              alt="E2B"
+              sx={{
+                width: 24,
+                height: 24,
+                flexShrink: 0,
+                borderRadius: '50%',
+              }}
+            />
+
+            <Typography
+              className="e2b-text"
+              sx={{
+                color: 'primary.main',
+                fontWeight: 700,
+                fontSize: '1rem',
+              }}
+            >
+              E2B
+            </Typography>
+          </Box>
         </Box>
 
         {/* Subtitle */}
@@ -259,12 +318,29 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStartTask, isCon
           sx={{
             color: 'text.secondary',
             maxWidth: '650px',
-            mb: 6,
+            mb: 3,
             lineHeight: 1.7,
           }}
         >
-          Watch in real-time as AI agents write and execute Python code to complete tasks.
-          Built by Hugging Face, <strong>smolagents</strong> is LLM-agnostic and uses <strong>30% fewer steps</strong> than traditional agents.
+          Experience the future of AI automation as agents operate computers in real time to complete complex on-screen tasks (GUI agents).
+          Built by{' '}
+          <Box
+            component="a"
+            href="https://huggingface.co"
+            target="_blank"
+            rel="noopener noreferrer"
+            sx={{
+              color: 'primary.main',
+              textDecoration: 'none',
+              fontWeight: 700,
+              '&:hover': {
+                textDecoration: 'underline',
+              },
+            }}
+          >
+            Hugging Face
+          </Box>
+          , this platform provides intuitive <strong>visualization and annotation tools</strong>, enabling <strong>manual preferential data annotation</strong> for advanced agentic AI research.
         </Typography>
 
         {/* Task Input Section */}
@@ -417,6 +493,24 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStartTask, isCon
             </Box>
           </Box>
         </Paper>
+
+        {/* Research Notice */}
+        <Typography
+          variant="body2"
+          sx={{
+            color: 'text.secondary',
+            maxWidth: '700px',
+            mt: 3,
+            mb: 2,
+            lineHeight: 1.6,
+            fontStyle: 'italic',
+            opacity: 0.8,
+            textAlign: 'center',
+          }}
+        >
+          Please be aware that by using the demo, you agree that the traces are stored for research purposes.
+          <strong>Please do not write any personal information.</strong>
+        </Typography>
 
         {/* Connection status hint */}
         {!isConnected && (

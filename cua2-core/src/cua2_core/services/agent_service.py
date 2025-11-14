@@ -1,11 +1,12 @@
 import asyncio
 import base64
+import fcntl
 import json
 import logging
 import os
 import time
 from io import BytesIO
-from typing import Callable, Literal
+from typing import IO, Callable, Literal
 from uuid import uuid4
 
 from cua2_core.models.models import (
@@ -52,6 +53,7 @@ class AgentService:
         self.last_screenshot: dict[str, AgentImage | None] = {}
         self._lock = asyncio.Lock()
         self.max_sandboxes = int(600 / num_workers)
+        self._archival_lock_file: IO[str] | None = None
 
         # Initialize archival service in dedicated process
         self.archival_service = ArchivalService(
@@ -61,8 +63,41 @@ class AgentService:
             archive_interval_minutes=30,
             folder_age_threshold_minutes=30,
         )
-        # Start the archival service process
-        self.archival_service.start()
+        # Start the archival service process only on one worker
+        if self._should_start_archival_service():
+            self.archival_service.start()
+            logger.info(f"Started archival service in worker PID {os.getpid()}")
+        else:
+            logger.info(
+                f"Skipping archival service start in worker PID {os.getpid()} (already running in another worker)"
+            )
+
+    def _should_start_archival_service(self) -> bool:
+        """
+        Determine if this worker should start the archival service.
+        Uses file-based locking to ensure only one worker across all processes
+        starts the archival service.
+
+        Returns:
+            True if this worker should start the archival service, False otherwise
+        """
+        lock_file_path = "/tmp/cua2_archival_service.lock"
+
+        try:
+            self._archival_lock_file = open(lock_file_path, "w")
+            fcntl.flock(
+                self._archival_lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB
+            )
+
+            self._archival_lock_file.write(str(os.getpid()))
+            self._archival_lock_file.flush()
+            return True
+
+        except (IOError, OSError):
+            if self._archival_lock_file:
+                self._archival_lock_file.close()
+                self._archival_lock_file = None
+            return False
 
     def _update_archival_active_tasks(self):
         """
@@ -243,6 +278,7 @@ class AgentService:
 
             self.active_tasks[message_id].update_trace_metadata(
                 final_state=final_state,
+                completed=True,
             )
 
             if message_id in self.active_tasks:
@@ -475,6 +511,58 @@ class AgentService:
             except (ValueError, KeyError, TypeError) as e:
                 raise ValueError(f"Error processing step update: {e}")
 
+    def update_trace_evaluation(
+        self,
+        trace_id: str,
+        user_evaluation: Literal["success", "failed", "not_evaluated"],
+    ):
+        """
+        Update the user evaluation for a trace
+
+        Args:
+            trace_id: The trace ID
+            user_evaluation: The evaluation value to set
+
+        Raises:
+            FileNotFoundError: If trace not found
+        """
+        # Try to find in active tasks first
+        active_task = self.active_tasks.get(trace_id)
+
+        if active_task:
+            # Task is still active
+            active_task.update_trace_metadata(user_evaluation=user_evaluation)
+        else:
+            # Task is not active, try to load from file
+            data_dir = "data"
+            trace_dirs = [
+                d for d in os.listdir(data_dir) if d.startswith(f"trace-{trace_id}")
+            ]
+
+            if not trace_dirs:
+                raise FileNotFoundError("Trace not found")
+
+            trace_path = os.path.join(data_dir, trace_dirs[0])
+            tasks_file = os.path.join(trace_path, "tasks.json")
+
+            if not os.path.exists(tasks_file):
+                raise FileNotFoundError("Trace data not found")
+
+            try:
+                # Load the trace data
+                with open(tasks_file, "r") as f:
+                    task_data = json.load(f)
+
+                # Update the user_evaluation
+                task_data["traceMetadata"]["user_evaluation"] = user_evaluation
+
+                # Save the updated data
+                with open(tasks_file, "w") as f:
+                    json.dump(task_data, f, indent=2)
+
+            except (KeyError, TypeError) as e:
+                raise ValueError(f"Error processing trace evaluation update: {e}")
+
     async def stop_task(self, trace_id: str):
         """Stop a task"""
         if trace_id in self.active_tasks:
@@ -518,3 +606,29 @@ class AgentService:
 
             except Exception as e:
                 logger.error(f"Error cleaning up task {message_id}: {e}", exc_info=True)
+
+    async def cleanup(self):
+        """
+        Cleanup method called during service shutdown.
+        Stops the archival service and releases the lock file.
+        """
+        try:
+            # Stop the archival service if it's running
+            if self.archival_service.is_alive():
+                logger.info("Stopping archival service...")
+                self.archival_service.stop()
+                logger.info("Archival service stopped")
+
+            # Release the lock file if we hold it
+            if self._archival_lock_file:
+                try:
+                    fcntl.flock(self._archival_lock_file.fileno(), fcntl.LOCK_UN)
+                    self._archival_lock_file.close()
+                    logger.info("Released archival service lock")
+                except Exception as e:
+                    logger.warning(f"Error releasing archival lock: {e}")
+                finally:
+                    self._archival_lock_file = None
+
+        except Exception as e:
+            logger.error(f"Error during AgentService cleanup: {e}", exc_info=True)

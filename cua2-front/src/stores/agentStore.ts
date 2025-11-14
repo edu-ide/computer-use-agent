@@ -22,6 +22,8 @@ interface AgentState {
   setTrace: (trace: AgentTrace | undefined) => void;
   setTraceId: (traceId: string | null) => void;
   updateTraceWithStep: (step: AgentStep, metadata: AgentTraceMetadata) => void;
+  updateStepEvaluation: (stepId: string, evaluation: 'like' | 'dislike' | 'neutral') => void;
+  updateTraceEvaluation: (evaluation: 'success' | 'failed' | 'not_evaluated') => void;
   completeTrace: (metadata: AgentTraceMetadata, finalState?: 'success' | 'stopped' | 'max_steps_reached' | 'error' | 'sandbox_timeout') => void;
   setIsAgentProcessing: (processing: boolean) => void;
   setIsConnectingToE2B: (connecting: boolean) => void;
@@ -95,6 +97,59 @@ export const useAgentStore = create<AgentState>()(
           },
           false,
           'updateTraceWithStep'
+        ),
+
+      // Update step evaluation in the store
+      updateStepEvaluation: (stepId, evaluation) =>
+        set(
+          (state) => {
+            if (!state.trace || !state.trace.steps) return state;
+
+            const updatedSteps = state.trace.steps.map((step) =>
+              step.stepId === stepId
+                ? { ...step, step_evaluation: evaluation }
+                : step
+            );
+
+            return {
+              trace: {
+                ...state.trace,
+                steps: updatedSteps,
+              },
+            };
+          },
+          false,
+          'updateStepEvaluation'
+        ),
+
+      // Update trace evaluation in the store
+      updateTraceEvaluation: (evaluation) =>
+        set(
+          (state) => {
+            if (!state.trace || !state.trace.traceMetadata) return state;
+
+            const updatedMetadata = {
+              ...state.trace.traceMetadata,
+              user_evaluation: evaluation,
+            };
+
+            return {
+              trace: {
+                ...state.trace,
+                traceMetadata: updatedMetadata,
+              },
+              // Also update finalStep metadata if it exists
+              finalStep: state.finalStep ? {
+                ...state.finalStep,
+                metadata: {
+                  ...state.finalStep.metadata,
+                  user_evaluation: evaluation,
+                },
+              } : state.finalStep,
+            };
+          },
+          false,
+          'updateTraceEvaluation'
         ),
 
       // Complete the trace
@@ -196,12 +251,16 @@ export const useAgentStore = create<AgentState>()(
                 numberOfSteps: state.trace.steps?.length || 0,
                 maxSteps: 200,
                 completed: false,
+                final_state: null,
+                user_evaluation: 'not_evaluated' as const,
               };
 
               // Ensure maxSteps is not 0
-              const finalMetadata = {
+              const finalMetadata: AgentTraceMetadata = {
                 ...metadata,
                 maxSteps: metadata.maxSteps > 0 ? metadata.maxSteps : 200,
+                final_state: metadata.final_state || null,
+                user_evaluation: metadata.user_evaluation || 'not_evaluated',
               };
 
               const finalStep: FinalStep = {

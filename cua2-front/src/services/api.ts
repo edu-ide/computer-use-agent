@@ -54,3 +54,25 @@ export async function updateStepEvaluation(
     throw new Error('Failed to update step evaluation');
   }
 }
+
+/**
+ * Update trace evaluation (overall task feedback)
+ */
+export async function updateTraceEvaluation(
+  traceId: string,
+  evaluation: 'success' | 'failed' | 'not_evaluated'
+): Promise<void> {
+  const response = await fetch(`${getApiBaseUrl()}/traces/${traceId}/evaluation`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      user_evaluation: evaluation,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to update trace evaluation');
+  }
+}
