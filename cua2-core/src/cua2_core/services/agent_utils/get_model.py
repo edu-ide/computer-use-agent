@@ -9,4 +9,4 @@ AVAILABLE_MODELS = [
 
 def get_model(model_id: str) -> Model:
     """Get the model"""
-    return InferenceClientModel(model_id=model_id)
+    return InferenceClientModel(bill_to="smolagents", model_id=model_id)
