@@ -48,7 +48,6 @@ cua2-front/build/
 # Git
 .git/
 .gitignore
-.gitattributes
 
 # Documentation
 *.md
