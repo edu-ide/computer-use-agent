@@ -1,4 +1,4 @@
-import { AgentTrace, AgentStep, AgentTraceMetadata, FinalStep } from '@/types/agent';
+import { AgentStep, AgentTrace, AgentTraceMetadata, FinalStep } from '@/types/agent';
 
 /**
  * Extract final answer from steps
@@ -60,14 +60,13 @@ export const exportTraceToJson = (
       traceId: step.traceId,
       stepId: step.stepId,
       error: step.error,
+      image: step.image, // Include full base64 image
       thought: step.thought,
       actions: step.actions,
       duration: step.duration,
       inputTokensUsed: step.inputTokensUsed,
       outputTokensUsed: step.outputTokensUsed,
       step_evaluation: step.step_evaluation,
-      // Don't include base64 image to reduce JSON size
-      hasImage: !!step.image,
     })),
     exportedAt: new Date().toISOString(),
   };

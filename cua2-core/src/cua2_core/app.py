@@ -39,6 +39,7 @@ async def lifespan(app: FastAPI):
     yield
 
     print("Shutting down services...")
+    await agent_service.cleanup()
     await sandbox_service.cleanup_sandboxes()
     print("Services shut down successfully")
 

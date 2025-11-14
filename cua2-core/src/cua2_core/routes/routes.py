@@ -8,6 +8,8 @@ from cua2_core.models.models import (
     HealthResponse,
     UpdateStepRequest,
     UpdateStepResponse,
+    UpdateTraceEvaluationRequest,
+    UpdateTraceEvaluationResponse,
 )
 from cua2_core.services.agent_service import AgentService
 from cua2_core.services.agent_utils.get_model import AVAILABLE_MODELS
@@ -88,6 +90,30 @@ async def update_trace_step(
         return UpdateStepResponse(
             success=True,
             message="Step updated successfully",
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.patch(
+    "/traces/{trace_id}/evaluation", response_model=UpdateTraceEvaluationResponse
+)
+async def update_trace_evaluation(
+    trace_id: str,
+    request: UpdateTraceEvaluationRequest,
+    agent_service: AgentService = Depends(get_agent_service),
+):
+    """Update the user evaluation for a trace (overall task feedback)"""
+    try:
+        agent_service.update_trace_evaluation(
+            trace_id=trace_id,
+            user_evaluation=request.user_evaluation,
+        )
+        return UpdateTraceEvaluationResponse(
+            success=True,
+            message="Trace evaluation updated successfully",
         )
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))

@@ -1,3 +1,5 @@
+import { updateTraceEvaluation } from '@/services/api';
+import { useAgentStore } from '@/stores/agentStore';
 import { AgentStep, AgentTrace, FinalStep } from '@/types/agent';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import AddIcon from '@mui/icons-material/Add';
@@ -11,8 +13,10 @@ import InputIcon from '@mui/icons-material/Input';
 import OutputIcon from '@mui/icons-material/Output';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
 import StopCircleIcon from '@mui/icons-material/StopCircle';
-import { Alert, Box, Button, Divider, Paper, Typography } from '@mui/material';
-import React from 'react';
+import ThumbDownIcon from '@mui/icons-material/ThumbDown';
+import ThumbUpIcon from '@mui/icons-material/ThumbUp';
+import { Alert, Box, Button, Divider, IconButton, Paper, Tooltip, Typography } from '@mui/material';
+import React, { useState } from 'react';
 import { DownloadGifButton } from './DownloadGifButton';
 import { DownloadJsonButton } from './DownloadJsonButton';
 
@@ -42,6 +46,30 @@ export const CompletionView: React.FC<CompletionViewProps> = ({
   onDownloadJson,
   onBackToHome,
 }) => {
+  const updateTraceEvaluationInStore = useAgentStore((state) => state.updateTraceEvaluation);
+  const [evaluation, setEvaluation] = useState<'success' | 'failed' | 'not_evaluated'>(
+    finalStep.metadata.user_evaluation || 'not_evaluated'
+  );
+  const [isVoting, setIsVoting] = useState(false);
+
+  const handleTraceEvaluation = async (vote: 'success' | 'failed') => {
+    if (isVoting || !trace?.id) return;
+
+    const newEvaluation = evaluation === vote ? 'not_evaluated' : vote;
+    setIsVoting(true);
+
+    try {
+      await updateTraceEvaluation(trace.id, newEvaluation);
+      setEvaluation(newEvaluation);
+      // Update the store so the evaluation is reflected in JSON export
+      updateTraceEvaluationInStore(newEvaluation);
+    } catch (error) {
+      console.error('Failed to update trace evaluation:', error);
+    } finally {
+      setIsVoting(false);
+    }
+  };
+
   const getStatusConfig = () => {
     switch (finalStep.type) {
       case 'success':
@@ -226,6 +254,62 @@ export const CompletionView: React.FC<CompletionViewProps> = ({
             </Box>
           </Box>
         )}
+
+        {/* Trace Evaluation */}
+        <Box sx={{ mb: 2 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Typography
+              variant="caption"
+              sx={{
+                fontWeight: 700,
+                color: 'text.secondary',
+                fontSize: '0.7rem',
+                textTransform: 'uppercase',
+                letterSpacing: '0.5px',
+              }}
+            >
+              Was this task completed successfully?
+            </Typography>
+
+            {/* Evaluation buttons */}
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <Tooltip title={evaluation === 'success' ? 'Remove success rating' : 'Mark as successful'}>
+                <IconButton
+                  size="small"
+                  onClick={() => handleTraceEvaluation('success')}
+                  disabled={isVoting}
+                  sx={{
+                    padding: '4px',
+                    color: evaluation === 'success' ? 'success.main' : 'action.disabled',
+                    '&:hover': {
+                      color: 'success.main',
+                      backgroundColor: (theme) => theme.palette.mode === 'dark' ? 'rgba(102, 187, 106, 0.1)' : 'rgba(102, 187, 106, 0.08)',
+                    },
+                  }}
+                >
+                  <ThumbUpIcon sx={{ fontSize: 18 }} />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title={evaluation === 'failed' ? 'Remove failure rating' : 'Mark as failed'}>
+                <IconButton
+                  size="small"
+                  onClick={() => handleTraceEvaluation('failed')}
+                  disabled={isVoting}
+                  sx={{
+                    padding: '4px',
+                    color: evaluation === 'failed' ? 'error.main' : 'action.disabled',
+                    '&:hover': {
+                      color: 'error.main',
+                      backgroundColor: (theme) => theme.palette.mode === 'dark' ? 'rgba(244, 67, 54, 0.1)' : 'rgba(244, 67, 54, 0.08)',
+                    },
+                  }}
+                >
+                  <ThumbDownIcon sx={{ fontSize: 18 }} />
+                </IconButton>
+              </Tooltip>
+            </Box>
+          </Box>
+        </Box>
 
         {/* Divider before metrics */}
         <Divider sx={{ my: 2 }} />

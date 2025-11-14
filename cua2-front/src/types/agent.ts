@@ -36,6 +36,7 @@ export interface AgentTraceMetadata {
   maxSteps: number;
   completed: boolean;
   final_state: 'success' | 'stopped' | 'max_steps_reached' | 'error' | 'sandbox_timeout' | null;
+  user_evaluation?: 'success' | 'failed' | 'not_evaluated';
 }
 
 export interface FinalStep {

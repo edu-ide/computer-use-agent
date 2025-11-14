@@ -110,8 +110,11 @@ export const SandboxViewer: React.FC<SandboxViewerProps> = ({
 
   // Handler to go back to home
   const handleBackToHome = () => {
-    resetAgent();
-    navigate('/');
+    // Reset frontend state
+    useAgentStore.getState().resetAgent();
+
+    // Reload the page to reconnect websocket
+    window.location.href = '/';
   };
 
   // Handler to go back to live mode

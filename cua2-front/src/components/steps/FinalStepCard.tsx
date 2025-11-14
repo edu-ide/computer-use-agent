@@ -1,12 +1,12 @@
+import { useAgentStore } from '@/stores/agentStore';
 import { FinalStep } from '@/types/agent';
-import React from 'react';
-import { Card, CardContent, Box, Typography } from '@mui/material';
+import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import CheckIcon from '@mui/icons-material/Check';
 import CloseIcon from '@mui/icons-material/Close';
-import StopCircleIcon from '@mui/icons-material/StopCircle';
 import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
-import AccessTimeIcon from '@mui/icons-material/AccessTime';
-import { useAgentStore } from '@/stores/agentStore';
+import StopCircleIcon from '@mui/icons-material/StopCircle';
+import { Box, Card, CardContent, Typography } from '@mui/material';
+import React from 'react';
 
 interface FinalStepCardProps {
   finalStep: FinalStep;
@@ -74,8 +74,8 @@ export const FinalStepCard: React.FC<FinalStepCardProps> = ({ finalStep, isActiv
         cursor: 'pointer',
         boxShadow: isActive
           ? (theme) => `0 2px 8px ${theme.palette.mode === 'dark'
-              ? `rgba(${statusConfig.color === 'success' ? '102, 187, 106' : statusConfig.color === 'error' ? '244, 67, 54' : '255, 152, 0'}, 0.3)`
-              : `rgba(${statusConfig.color === 'success' ? '102, 187, 106' : statusConfig.color === 'error' ? '244, 67, 54' : '255, 152, 0'}, 0.2)`}`
+            ? `rgba(${statusConfig.color === 'success' ? '102, 187, 106' : statusConfig.color === 'error' ? '244, 67, 54' : '255, 152, 0'}, 0.3)`
+            : `rgba(${statusConfig.color === 'success' ? '102, 187, 106' : statusConfig.color === 'error' ? '244, 67, 54' : '255, 152, 0'}, 0.2)`}`
           : 'none',
         '&:hover': {
           borderColor: (theme) => `${theme.palette[statusConfig.color].main} !important`,

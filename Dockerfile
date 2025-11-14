@@ -48,6 +48,8 @@ RUN pip install --no-cache-dir uv
 # Copy the project files with proper ownership
 COPY --chown=user:user pyproject.toml ./
 COPY --chown=user:user cua2-core/ ./cua2-core/
+COPY --chown=user:user .gitattributes ./
+COPY --chown=user:user .gitattributes ./cua2-core/.gitattributes
 
 # Install Python dependencies
 RUN uv sync --all-extras

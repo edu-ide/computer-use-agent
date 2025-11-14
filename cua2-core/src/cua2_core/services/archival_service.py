@@ -298,9 +298,12 @@ def _process_old_folders(
                     f"Successfully verified {archive_path.name} in HuggingFace repo"
                 )
 
-                # Delete the local folder
-                shutil.rmtree(folder)
-                logger.info(f"Deleted local folder: {folder_name}")
+                # Delete the local folder (check if it still exists to avoid race conditions)
+                if folder.exists():
+                    shutil.rmtree(folder)
+                    logger.info(f"Deleted local folder: {folder_name}")
+                else:
+                    logger.warning(f"Folder {folder_name} already deleted, skipping")
 
                 # Delete the local archive
                 archive_path.unlink(missing_ok=True)
@@ -403,10 +406,6 @@ def _verify_file_in_repo(hf_dataset_repo: str, hf_token: str, filename: str) -> 
             filename=filename,
             repo_type="dataset",
             token=hf_token,
-            local_dir_use_symlinks=False,
-            # Just check if file exists without actually downloading
-            cache_dir=None,
-            local_files_only=False,
         )
 
         logger.info(f"Verified {filename} exists in repo")

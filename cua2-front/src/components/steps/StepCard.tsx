@@ -1,16 +1,14 @@
+import { updateStepEvaluation } from '@/services/api';
+import { useAgentStore } from '@/stores/agentStore';
 import { AgentStep } from '@/types/agent';
-import React, { useState } from 'react';
-import { Card, CardContent, Box, Typography, Divider, Chip, Paper, Accordion, AccordionSummary, AccordionDetails, IconButton, Tooltip } from '@mui/material';
-import ThoughtBubbleIcon from '@mui/icons-material/Psychology';
-import BoltIcon from '@mui/icons-material/Bolt';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import InputIcon from '@mui/icons-material/Input';
 import OutputIcon from '@mui/icons-material/Output';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import ThumbUpIcon from '@mui/icons-material/ThumbUp';
 import ThumbDownIcon from '@mui/icons-material/ThumbDown';
-import { useAgentStore } from '@/stores/agentStore';
-import { updateStepEvaluation } from '@/services/api';
+import ThumbUpIcon from '@mui/icons-material/ThumbUp';
+import { Accordion, AccordionDetails, AccordionSummary, Box, Card, CardContent, Chip, IconButton, Tooltip, Typography } from '@mui/material';
+import React, { useState } from 'react';
 
 interface StepCardProps {
   step: AgentStep;
@@ -21,6 +19,7 @@ interface StepCardProps {
 
 export const StepCard: React.FC<StepCardProps> = ({ step, index, isLatest = false, isActive = false }) => {
   const setSelectedStepIndex = useAgentStore((state) => state.setSelectedStepIndex);
+  const updateStepEvaluationInStore = useAgentStore((state) => state.updateStepEvaluation);
   const [thoughtExpanded, setThoughtExpanded] = useState(false);
   const [evaluation, setEvaluation] = useState<'like' | 'dislike' | 'neutral'>(step.step_evaluation || 'neutral');
   const [isVoting, setIsVoting] = useState(false);
@@ -44,6 +43,8 @@ export const StepCard: React.FC<StepCardProps> = ({ step, index, isLatest = fals
     try {
       await updateStepEvaluation(step.traceId, step.stepId, newEvaluation);
       setEvaluation(newEvaluation);
+      // Update the store so the evaluation is reflected in JSON export
+      updateStepEvaluationInStore(step.stepId, newEvaluation);
     } catch (error) {
       console.error('Failed to update step evaluation:', error);
     } finally {
@@ -206,7 +207,7 @@ export const StepCard: React.FC<StepCardProps> = ({ step, index, isLatest = fals
                 </Tooltip>
               </Box>
             </Box>
-            <Box component="ul" sx={{ listStyle: 'none', p: 0, m: 0}}>
+            <Box component="ul" sx={{ listStyle: 'none', p: 0, m: 0 }}>
               {step.actions.map((action, actionIndex) => (
                 <Box
                   key={actionIndex}
