@@ -15,15 +15,12 @@ export async function fetchAvailableModels(): Promise<string[]> {
 /**
  * Generate a random instruction from the backend
  */
-export async function generateRandomQuestion(modelId: string): Promise<string> {
+export async function generateRandomQuestion(): Promise<string> {
   const response = await fetch(`${getApiBaseUrl()}/generate-instruction`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      model_id: modelId,
-    }),
   });
   if (!response.ok) {
     throw new Error('Failed to generate instruction');
