@@ -1,4 +1,4 @@
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import pytest
 from cua2_core.models.models import AvailableModelsResponse, UpdateStepResponse
@@ -282,53 +282,6 @@ class TestUpdateTraceStep:
         update_response = UpdateStepResponse(**data)
         assert update_response.success is True
         assert update_response.message == "Step updated successfully"
-
-
-class TestGenerateInstruction:
-    """Test suite for POST /generate-instruction endpoint"""
-
-    @patch("cua2_core.routes.routes.InstructionService.generate_instruction")
-    def test_generate_instruction_success(self, mock_generate, client):
-        """Test successful instruction generation with mocked model"""
-        # Mock the instruction generation
-        mock_instruction = "Open Google Chrome and navigate to example.com"
-        mock_generate.return_value = mock_instruction
-
-        request_data = {
-            "model_id": "Qwen/Qwen3-VL-8B-Instruct",
-            "prompt": "Generate a web browsing task",
-        }
-
-        response = client.post("/generate-instruction", json=request_data)
-
-        assert response.status_code == 200
-        data = response.json()
-
-        assert data["instruction"] == mock_instruction
-        assert data["model_id"] == request_data["model_id"]
-
-        # Verify the service was called correctly
-        mock_generate.assert_called_once_with(
-            model_id=request_data["model_id"], prompt=request_data["prompt"]
-        )
-
-    @patch("cua2_core.routes.routes.InstructionService.generate_instruction")
-    def test_generate_instruction_invalid_model(self, mock_generate, client):
-        """Test instruction generation with invalid model_id"""
-        # Mock the service to raise ValueError for invalid model
-        mock_generate.side_effect = ValueError(
-            "Invalid model_id 'invalid-model'. Must be one of: Qwen/Qwen3-VL-2B-Instruct, ..."
-        )
-
-        request_data = {
-            "model_id": "invalid-model",
-            "prompt": "Generate a task",
-        }
-
-        response = client.post("/generate-instruction", json=request_data)
-
-        assert response.status_code == 400
-        assert "Invalid model_id" in response.json()["detail"]
 
 
 class TestRoutesIntegration:

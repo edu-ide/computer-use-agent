@@ -4,6 +4,7 @@ from smolagents import InferenceClientModel, Model
 AVAILABLE_MODELS = [
     "Qwen/Qwen3-VL-8B-Instruct",
     "Qwen/Qwen3-VL-30B-A3B-Instruct",
+    "Qwen/Qwen3-VL-235B-A22B-Instruct",
 ]
 
 

@@ -400,15 +400,7 @@ class AvailableModelsResponse(BaseModel):
     models: list[str]
 
 
-class GenerateInstructionRequest(BaseModel):
-    """Request model for generating task instruction"""
-
-    model_id: str
-    prompt: Optional[str] = None
-
-
 class GenerateInstructionResponse(BaseModel):
     """Response model for generated task instruction"""
 
     instruction: str
-    model_id: str

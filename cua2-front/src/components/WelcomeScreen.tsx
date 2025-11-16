@@ -70,7 +70,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStartTask, isCon
 
     setIsGeneratingQuestion(true);
     try {
-      const randomTask = await generateRandomQuestion(selectedModelId);
+      const randomTask = await generateRandomQuestion();
 
       // Clear current text
       setCustomTask('');
@@ -89,7 +89,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStartTask, isCon
           }
           setIsTyping(false);
         }
-      }, 30); // 30ms per character
+      }, 10); // 10ms per character
     } catch (error) {
       console.error('Failed to generate question:', error);
       setIsTyping(false);

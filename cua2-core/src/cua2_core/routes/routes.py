@@ -3,7 +3,6 @@ from datetime import datetime
 # Get services from app state
 from cua2_core.models.models import (
     AvailableModelsResponse,
-    GenerateInstructionRequest,
     GenerateInstructionResponse,
     HealthResponse,
     UpdateStepRequest,
@@ -50,18 +49,11 @@ async def get_available_models():
 
 
 @router.post("/generate-instruction", response_model=GenerateInstructionResponse)
-async def generate_task_instruction(
-    request: GenerateInstructionRequest,
-):
-    """Generate a task instruction using a specified model"""
+async def generate_task_instruction():
+    """Get a random task instruction from the pregenerated pool"""
     try:
-        instruction = InstructionService.generate_instruction(
-            model_id=request.model_id, prompt=request.prompt
-        )
-
-        return GenerateInstructionResponse(
-            instruction=instruction, model_id=request.model_id
-        )
+        instruction = InstructionService.get_random_instruction()
+        return GenerateInstructionResponse(instruction=instruction)
 
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
