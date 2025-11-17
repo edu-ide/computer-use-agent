@@ -4,7 +4,8 @@ emoji: 🤖
 colorFrom: blue
 colorTo: indigo
 sdk: docker
-pinned: false
+pinned: true
+header: mini
 ---
 
 # CUA2 - Computer Use Agent
