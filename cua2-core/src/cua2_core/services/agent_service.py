@@ -25,7 +25,7 @@ from cua2_core.websocket.websocket_manager import WebSocketException, WebSocketM
 from e2b_desktop import Sandbox, TimeoutException
 from fastapi import WebSocket
 from PIL import Image
-from smolagents import ActionStep, AgentImage, AgentMaxStepsError, TaskStep
+from smolagents import ActionStep, AgentMaxStepsError, TaskStep
 from starlette.websockets import WebSocketState
 
 logger = logging.getLogger(__name__)
@@ -50,7 +50,7 @@ class AgentService:
         self.websocket_manager: WebSocketManager = websocket_manager
         self.task_websockets: dict[str, WebSocket] = {}
         self.sandbox_service: SandboxService = sandbox_service
-        self.last_screenshot: dict[str, AgentImage | None] = {}
+        self.last_screenshot: dict[str, tuple[Image.Image, str] | None] = {}
         self._lock = asyncio.Lock()
         self.max_sandboxes = int(600 / num_workers)
         self._archival_lock_file: IO[str] | None = None
@@ -222,10 +222,7 @@ class AgentService:
             step_filename = f"{message_id}-1"
             screenshot_bytes = agent.desktop.screenshot()
             image = Image.open(BytesIO(screenshot_bytes))
-            screenshot_path = os.path.join(agent.data_dir, f"{step_filename}.png")
-            image.save(screenshot_path)
-
-            self.last_screenshot[message_id] = image
+            self.last_screenshot[message_id] = (image, step_filename)
 
             await asyncio.to_thread(
                 agent.run,
@@ -364,32 +361,16 @@ class AgentService:
             ):
                 time.sleep(3)
 
-            image = self.last_screenshot[message_id]
-            assert image is not None
+            image, step_filename = self.last_screenshot[message_id]  # type: ignore
+            assert image is not None and step_filename is not None
+            screenshot_path = os.path.join(agent.data_dir, f"{step_filename}.png")
+            image.save(screenshot_path)
 
-            for previous_memory_step in (
-                agent.memory.steps
-            ):  # Remove previous screenshots from logs for lean processing
-                if (
-                    isinstance(previous_memory_step, ActionStep)
-                    and previous_memory_step.step_number is not None
-                    and previous_memory_step.step_number <= memory_step.step_number - 1
-                ):
-                    previous_memory_step.observations_images = None
-                elif isinstance(previous_memory_step, TaskStep):
-                    previous_memory_step.task_images = None
-
-            memory_step.observations_images = [image.copy()]
-
-            if memory_step.observations_images:
-                image = memory_step.observations_images[0]
-                buffered = BytesIO()
-                image.save(buffered, format="PNG")
-                image_base64 = f"data:image/png;base64,{base64.b64encode(buffered.getvalue()).decode('utf-8')}"
-                del buffered
-                del image
-            else:
-                image_base64 = None
+            buffered = BytesIO()
+            image.save(buffered, format="PNG")
+            image_base64 = f"data:image/png;base64,{base64.b64encode(buffered.getvalue()).decode('utf-8')}"
+            del buffered
+            del image
 
             step = AgentStep(
                 traceId=message_id,
@@ -428,13 +409,26 @@ class AgentService:
             if self.active_tasks[message_id].traceMetadata.completed:
                 raise AgentStopException("Task not completed")
 
-            step_filename = f"{message_id}-{memory_step.step_number}"
+            step_filename = f"{message_id}-{memory_step.step_number + 1}"
             screenshot_bytes = agent.desktop.screenshot()
             image = Image.open(BytesIO(screenshot_bytes))
-            screenshot_path = os.path.join(agent.data_dir, f"{step_filename}.png")
-            image.save(screenshot_path)
+
+            for previous_memory_step in (
+                agent.memory.steps
+            ):  # Remove previous screenshots from logs for lean processing
+                if (
+                    isinstance(previous_memory_step, ActionStep)
+                    and previous_memory_step.step_number is not None
+                    and previous_memory_step.step_number <= memory_step.step_number
+                ):
+                    previous_memory_step.observations_images = None
+                elif isinstance(previous_memory_step, TaskStep):
+                    previous_memory_step.task_images = None
+
+            memory_step.observations_images = [image.copy()]
+
             del self.last_screenshot[message_id]
-            self.last_screenshot[message_id] = image
+            self.last_screenshot[message_id] = (image, step_filename)
 
         await self._agent_runner(message_id, step_callback)
 
