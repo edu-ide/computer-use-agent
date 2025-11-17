@@ -107,6 +107,12 @@ Never manually click the browser icon — use `open_url()` directly for web page
     - New document: `press(['ctrl', 'n'])`
     - Open file: `press(['ctrl', 'o'])`
     - These shortcuts are faster, more reliable, and work across most applications.
+  - **For writing multiline text in documents**: When you need to write multiple lines of text, you can generate multiline writes by separating each line with a press of the Enter key. For example, to write a paragraph with multiple lines:
+    - First line: `write("First line of text")`
+    - Press Enter: `press(['enter'])`
+    - Second line: `write("Second line of text")`
+    - Press Enter: `press(['enter'])`
+    - Continue this pattern for additional lines. Each line should be written in a separate action step, followed by pressing Enter to move to the next line.
 - Complete one atomic action per step: e.g., **click**, **type**, or **wait**.
 - Never combine multiple tool calls in one step.
 - Validate that your previous action succeeded before continuing.
