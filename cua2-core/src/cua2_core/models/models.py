@@ -280,6 +280,7 @@ class ActiveTask(BaseModel):
     def store_model(self):
         """Validate model ID"""
         with self._file_lock:
+            self.traceMetadata.traceId = self.message_id
             os.makedirs(self.trace_path, exist_ok=True)
             with open(f"{self.trace_path}/tasks.json", "w") as f:
                 json.dump(

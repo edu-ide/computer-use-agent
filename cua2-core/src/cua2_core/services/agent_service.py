@@ -360,7 +360,7 @@ class AgentService:
 
             if not (
                 agent_actions is not None
-                and any(action.function_name == "wait" for action in agent_actions)
+                and not any(action.function_name == "wait" for action in agent_actions)
             ):
                 time.sleep(3)
 
