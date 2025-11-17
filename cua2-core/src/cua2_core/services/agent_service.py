@@ -372,39 +372,40 @@ class AgentService:
             del buffered
             del image
 
-            step = AgentStep(
-                traceId=message_id,
-                stepId=str(memory_step.step_number),
-                image=image_base64,
-                thought=thought,
-                actions=agent_actions,
-                error=memory_step.error.message if memory_step.error else None,
-                duration=memory_step.timing.duration,
-                inputTokensUsed=memory_step.token_usage.input_tokens,
-                outputTokensUsed=memory_step.token_usage.output_tokens,
-                step_evaluation="neutral",
-            )
-
-            self.active_tasks[message_id].update_trace_metadata(
-                step_input_tokens_used=memory_step.token_usage.input_tokens,
-                step_output_tokens_used=memory_step.token_usage.output_tokens,
-                step_duration=memory_step.timing.duration,
-                step_numberOfSteps=1,
-            )
-
-            self.active_tasks[message_id].update_step(step)
-
-            websocket = self.task_websockets.get(message_id)
-            if websocket and websocket.client_state == WebSocketState.CONNECTED:
-                future = asyncio.run_coroutine_threadsafe(
-                    self.websocket_manager.send_agent_progress(
-                        step=step,
-                        metadata=self.active_tasks[message_id].traceMetadata,
-                        websocket=websocket,
-                    ),
-                    loop,
+            if memory_step.token_usage.input_tokens is not None:
+                step = AgentStep(
+                    traceId=message_id,
+                    stepId=str(memory_step.step_number),
+                    image=image_base64,
+                    thought=thought,
+                    actions=agent_actions,
+                    error=memory_step.error.message if memory_step.error else None,
+                    duration=memory_step.timing.duration,
+                    inputTokensUsed=memory_step.token_usage.input_tokens,
+                    outputTokensUsed=memory_step.token_usage.output_tokens,
+                    step_evaluation="neutral",
                 )
-                future.result()
+
+                self.active_tasks[message_id].update_trace_metadata(
+                    step_input_tokens_used=memory_step.token_usage.input_tokens,
+                    step_output_tokens_used=memory_step.token_usage.output_tokens,
+                    step_duration=memory_step.timing.duration,
+                    step_numberOfSteps=1,
+                )
+
+                self.active_tasks[message_id].update_step(step)
+
+                websocket = self.task_websockets.get(message_id)
+                if websocket and websocket.client_state == WebSocketState.CONNECTED:
+                    future = asyncio.run_coroutine_threadsafe(
+                        self.websocket_manager.send_agent_progress(
+                            step=step,
+                            metadata=self.active_tasks[message_id].traceMetadata,
+                            websocket=websocket,
+                        ),
+                        loop,
+                    )
+                    future.result()
 
             if self.active_tasks[message_id].traceMetadata.completed:
                 raise AgentStopException("Task not completed")
