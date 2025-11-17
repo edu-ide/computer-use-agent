@@ -416,11 +416,7 @@ class AgentService:
             for previous_memory_step in (
                 agent.memory.steps
             ):  # Remove previous screenshots from logs for lean processing
-                if (
-                    isinstance(previous_memory_step, ActionStep)
-                    and previous_memory_step.step_number is not None
-                    and previous_memory_step.step_number <= memory_step.step_number
-                ):
+                if isinstance(previous_memory_step, ActionStep):
                     previous_memory_step.observations_images = None
                 elif isinstance(previous_memory_step, TaskStep):
                     previous_memory_step.task_images = None
