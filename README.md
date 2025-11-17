@@ -1,5 +1,5 @@
 ---
-title: CUA2 - Computer Use Agent 2
+title: CUA - Computer Use Agent 2.0
 emoji: 🤖
 colorFrom: blue
 colorTo: indigo
