@@ -372,7 +372,7 @@ class AgentService:
             del buffered
             del image
 
-            if memory_step.token_usage.input_tokens is not None:
+            if memory_step.token_usage is not None:
                 step = AgentStep(
                     traceId=message_id,
                     stepId=str(memory_step.step_number),
