@@ -21,8 +21,14 @@ export const StepCard: React.FC<StepCardProps> = ({ step, index, isLatest = fals
   const setSelectedStepIndex = useAgentStore((state) => state.setSelectedStepIndex);
   const updateStepEvaluationInStore = useAgentStore((state) => state.updateStepEvaluation);
   const [thoughtExpanded, setThoughtExpanded] = useState(false);
+  const [actionsExpanded, setActionsExpanded] = useState(false);
   const [evaluation, setEvaluation] = useState<'like' | 'dislike' | 'neutral'>(step.step_evaluation || 'neutral');
   const [isVoting, setIsVoting] = useState(false);
+
+  const hasMultipleActions = step.actions && step.actions.length > 1;
+  const displayedActions = hasMultipleActions && !actionsExpanded
+    ? step.actions.slice(0, 1)
+    : step.actions;
 
   const handleClick = () => {
     setSelectedStepIndex(index);
@@ -167,6 +173,33 @@ export const StepCard: React.FC<StepCardProps> = ({ step, index, isLatest = fals
                 >
                   Action
                 </Typography>
+                {hasMultipleActions && (
+                  <Tooltip title={actionsExpanded ? 'Show less' : `Show all ${step.actions.length} actions`}>
+                    <IconButton
+                      size="small"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActionsExpanded(!actionsExpanded);
+                      }}
+                      sx={{
+                        padding: '2px',
+                        color: 'text.secondary',
+                        '&:hover': {
+                          color: 'text.primary',
+                          backgroundColor: 'action.hover',
+                        },
+                      }}
+                    >
+                      <ExpandMoreIcon
+                        sx={{
+                          fontSize: 16,
+                          transform: actionsExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
+                          transition: 'transform 0.2s',
+                        }}
+                      />
+                    </IconButton>
+                  </Tooltip>
+                )}
               </Box>
 
               {/* Vote buttons */}
@@ -208,7 +241,7 @@ export const StepCard: React.FC<StepCardProps> = ({ step, index, isLatest = fals
               </Box>
             </Box>
             <Box component="ul" sx={{ listStyle: 'none', p: 0, m: 0 }}>
-              {step.actions.map((action, actionIndex) => (
+              {displayedActions?.map((action, actionIndex) => (
                 <Box
                   key={actionIndex}
                   component="li"

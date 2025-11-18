@@ -347,7 +347,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStartTask, isCon
         <Paper
           elevation={0}
           sx={{
-            maxWidth: '700px',
+            maxWidth: '725px',
             width: '100%',
             p: 2.5,
             border: '2px solid',
