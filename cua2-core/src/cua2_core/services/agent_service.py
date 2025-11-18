@@ -21,6 +21,7 @@ from cua2_core.services.agent_utils.function_parser import parse_function_call
 from cua2_core.services.agent_utils.get_model import get_model
 from cua2_core.services.archival_service import ArchivalService
 from cua2_core.services.sandbox_service import SandboxService
+from cua2_core.services.utils import compress_image_to_max_size
 from cua2_core.websocket.websocket_manager import WebSocketException, WebSocketManager
 from e2b_desktop import Sandbox, TimeoutException
 from fastapi import WebSocket
@@ -413,6 +414,7 @@ class AgentService:
             step_filename = f"{message_id}-{memory_step.step_number + 1}"
             screenshot_bytes = agent.desktop.screenshot()
             image = Image.open(BytesIO(screenshot_bytes))
+            image = compress_image_to_max_size(image, max_size_kb=500)
 
             for previous_memory_step in (
                 agent.memory.steps
