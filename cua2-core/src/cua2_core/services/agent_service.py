@@ -356,11 +356,11 @@ class AgentService:
                 else None
             )
 
-            if not (
-                agent_actions is not None
-                and not any(action.function_name == "wait" for action in agent_actions)
-            ):
-                time.sleep(3)
+            # if not (
+            #     agent_actions is not None
+            #     and not any(action.function_name == "wait" for action in agent_actions)
+            # ):
+            time.sleep(3)
 
             image, step_filename = self.last_screenshot[message_id]  # type: ignore
             assert image is not None and step_filename is not None
