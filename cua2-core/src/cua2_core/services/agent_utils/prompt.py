@@ -113,8 +113,10 @@ Never manually click the browser icon — use `open_url()` directly for web page
     press(['enter'])
     write("Second line of text")
     press(['enter'])
+    write("Third line of text")
+    press(['enter'])
     ```
-    This allows you to write multiple lines efficiently in a single step.
+    **IMPORTANT**: This allows you to write multiple lines efficiently in a single step. Always use this approach when writing multiline text in documents.
 - Complete one atomic action per step: e.g., **click**, **type**, or **wait**. Exception: For multiline document writing, you may combine multiple write and press enter actions in one step.
 - Never combine multiple tool calls in one step, except for multiline document writing as described above.
 - Validate that your previous action succeeded before continuing.
