@@ -413,8 +413,9 @@ class AgentService:
 
             step_filename = f"{message_id}-{memory_step.step_number + 1}"
             screenshot_bytes = agent.desktop.screenshot()
-            image = Image.open(BytesIO(screenshot_bytes))
-            image = compress_image_to_max_size(image, max_size_kb=500)
+            original_image = Image.open(BytesIO(screenshot_bytes))
+            image = compress_image_to_max_size(original_image, max_size_kb=500)
+            del original_image
 
             for previous_memory_step in (
                 agent.memory.steps

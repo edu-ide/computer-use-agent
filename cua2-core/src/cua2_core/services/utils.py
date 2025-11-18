@@ -27,7 +27,9 @@ def compress_image_to_max_size(
     for compress_level in [3, 6, 9]:
         buffered = BytesIO()
         current_image.save(buffered, format="PNG", compress_level=compress_level)
-        png_size = buffered.tell()
+        png_bytes = buffered.getvalue()
+        buffered.close()
+        png_size = len(png_bytes)
         if png_size <= max_size_bytes:
             # Size is acceptable, return the image as-is (it's already in PNG format when saved)
             return current_image
@@ -52,7 +54,9 @@ def compress_image_to_max_size(
         # Check PNG size with best compression
         buffered = BytesIO()
         resized_image.save(buffered, format="PNG", compress_level=9)
-        png_size = buffered.tell()
+        png_bytes = buffered.getvalue()
+        buffered.close()
+        png_size = len(png_bytes)
 
         if png_size <= max_size_bytes:
             # Found acceptable size
