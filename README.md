@@ -5,7 +5,6 @@ colorFrom: blue
 colorTo: indigo
 sdk: docker
 pinned: true
-header: mini
 ---
 
 # CUA2 - Computer Use Agent
