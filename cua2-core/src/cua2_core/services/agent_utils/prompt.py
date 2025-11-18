@@ -107,14 +107,16 @@ Never manually click the browser icon — use `open_url()` directly for web page
     - New document: `press(['ctrl', 'n'])`
     - Open file: `press(['ctrl', 'o'])`
     - These shortcuts are faster, more reliable, and work across most applications.
-  - **For writing multiline text in documents**: When you need to write multiple lines of text, you can generate multiline writes by separating each line with a press of the Enter key. For example, to write a paragraph with multiple lines:
-    - First line: `write("First line of text")`
-    - Press Enter: `press(['enter'])`
-    - Second line: `write("Second line of text")`
-    - Press Enter: `press(['enter'])`
-    - Continue this pattern for additional lines. Each line should be written in a separate action step, followed by pressing Enter to move to the next line.
-- Complete one atomic action per step: e.g., **click**, **type**, or **wait**.
-- Never combine multiple tool calls in one step.
+  - **For writing multiline text in documents**: When writing multiple lines of text in documents, always use `press(['enter'])` to create new lines. You can generate multiple actions in one step by combining write and press enter actions. For example, to write two lines:
+    ```python
+    write("First line of text")
+    press(['enter'])
+    write("Second line of text")
+    press(['enter'])
+    ```
+    This allows you to write multiple lines efficiently in a single step.
+- Complete one atomic action per step: e.g., **click**, **type**, or **wait**. Exception: For multiline document writing, you may combine multiple write and press enter actions in one step.
+- Never combine multiple tool calls in one step, except for multiline document writing as described above.
 - Validate that your previous action succeeded before continuing.
 - If the interface hasn't changed, adjust your strategy instead of repeating endlessly.
 - Use `wait(seconds)` for short delays if the interface is loading.
