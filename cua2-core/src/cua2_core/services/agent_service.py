@@ -184,7 +184,7 @@ class AgentService:
 
             model = get_model(self.active_tasks[message_id].model_id)
 
-            max_attempts = 10
+            max_attempts = 20
             for _ in range(max_attempts):
                 response = await self.sandbox_service.acquire_sandbox(message_id)
                 if response.sandbox is not None and response.state == "ready":

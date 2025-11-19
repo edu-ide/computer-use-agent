@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 SANDBOX_METADATA: dict[str, dict[str, Any]] = {}
 SANDBOX_TIMEOUT = 500
-SANDBOX_CREATION_TIMEOUT = 180
+SANDBOX_CREATION_TIMEOUT = 200
 WIDTH = 1280
 HEIGHT = 960
 
