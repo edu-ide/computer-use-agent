@@ -138,6 +138,21 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStartTask, isCon
           py: 8,
         }}
       >
+        {/* Hugging Face Logo */}
+        <Box
+          component="img"
+          src="https://huggingface.co/front/assets/huggingface_logo-noborder.svg"
+          alt="Hugging Face"
+          sx={{
+            width: 96,
+            height: 96,
+            mb: 3,
+            flexShrink: 0,
+            display: 'block',
+            maxWidth: '100%',
+          }}
+        />
+
         {/* Title */}
         <Typography
           variant="h2"
@@ -193,7 +208,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStartTask, isCon
             {/* Hugging Face Official Logo */}
             <Box
               component="img"
-              src="https://huggingface.co/front/assets/huggingface_logo-noborder.svg"
+              src="https://cdn-avatars.huggingface.co/v1/production/uploads/63d10d4e8eaa4831005e92b5/a3R8vs2eGE578q4LEpaHB.png"
               alt="Hugging Face"
               sx={{
                 width: 24,
