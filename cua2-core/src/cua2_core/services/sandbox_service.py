@@ -10,6 +10,9 @@ from pydantic import BaseModel
 SANDBOX_METADATA: dict[str, dict[str, Any]] = {}
 SANDBOX_TIMEOUT = 500
 SANDBOX_CREATION_TIMEOUT = 200
+SANDBOX_CREATION_MAX_TIME = (
+    300  # Maximum time a sandbox can be in "creating" state (5 minutes)
+)
 WIDTH = 1280
 HEIGHT = 960
 
@@ -29,6 +32,7 @@ class SandboxService:
         self.sandboxes: dict[str, Sandbox] = {}
         self.sandbox_metadata: dict[str, dict[str, Any]] = {}
         self.sandbox_lock = asyncio.Lock()
+        self._cleanup_task: asyncio.Task | None = None
 
     async def _create_sandbox_background(
         self, session_hash: str, expired_sandbox: Sandbox | None
@@ -60,12 +64,25 @@ class SandboxService:
             desktop = await asyncio.to_thread(create_and_setup_sandbox)
             print(f"Sandbox ID for session {session_hash} is {desktop.sandbox_id}.")
 
-            # Log sandbox creation
-
             # Update sandbox state under lock
             async with self.sandbox_lock:
-                self.sandboxes[session_hash] = desktop
-                self.sandbox_metadata[session_hash]["state"] = "ready"
+                # Double-check metadata still exists and is in "creating" state
+                # (it might have been released while we were creating)
+                if (
+                    session_hash in self.sandbox_metadata
+                    and self.sandbox_metadata[session_hash].get("state") == "creating"
+                ):
+                    self.sandboxes[session_hash] = desktop
+                    self.sandbox_metadata[session_hash]["state"] = "ready"
+                else:
+                    # Sandbox was released while creating, kill it immediately
+                    print(
+                        f"Sandbox {session_hash} was released during creation, killing it"
+                    )
+                    try:
+                        await asyncio.to_thread(desktop.kill)
+                    except Exception as kill_error:
+                        print(f"Error killing orphaned sandbox: {str(kill_error)}")
 
         except Exception as e:
             print(f"Error creating sandbox for session {session_hash}: {str(e)}")
@@ -73,6 +90,27 @@ class SandboxService:
             async with self.sandbox_lock:
                 if session_hash in self.sandbox_metadata:
                     del self.sandbox_metadata[session_hash]
+
+    async def _periodic_cleanup(self):
+        """Background task to periodically clean up stuck creating sandboxes"""
+        while True:
+            try:
+                await asyncio.sleep(60)  # Run every minute
+                await self.cleanup_stuck_creating_sandboxes()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                print(f"Error in periodic cleanup: {str(e)}")
+
+    def start_periodic_cleanup(self):
+        """Start the periodic cleanup task"""
+        if self._cleanup_task is None or self._cleanup_task.done():
+            self._cleanup_task = asyncio.create_task(self._periodic_cleanup())
+
+    def stop_periodic_cleanup(self):
+        """Stop the periodic cleanup task"""
+        if self._cleanup_task and not self._cleanup_task.done():
+            self._cleanup_task.cancel()
 
     async def acquire_sandbox(self, session_hash: str) -> SandboxResponse:
         current_time = datetime.now()
@@ -114,10 +152,19 @@ class SandboxService:
                     del self.sandbox_metadata[session_hash]
 
             # Check if we have capacity
-            if len(self.sandboxes) >= self.max_sandboxes:
+            # Count both ready sandboxes and sandboxes in "creating" state
+            # We count BEFORE adding this one to ensure we don't exceed the limit
+            creating_count = sum(
+                1
+                for meta in self.sandbox_metadata.values()
+                if meta.get("state") == "creating"
+            )
+            # Check capacity BEFORE adding this session_hash to metadata
+            if len(self.sandboxes) + creating_count >= self.max_sandboxes:
                 return SandboxResponse(sandbox=None, state="max_sandboxes_reached")
 
             # Mark that we're creating this sandbox
+            # This happens atomically within the lock, so no race condition
             print(f"Creating new sandbox for session {session_hash}")
             self.sandbox_metadata[session_hash] = {
                 "state": "creating",
@@ -132,14 +179,19 @@ class SandboxService:
                 self._create_sandbox_background(session_hash, expired_sandbox)
             )
 
+        # Check state after starting background task (it might complete very quickly)
         async with self.sandbox_lock:
-            if self.sandbox_metadata[session_hash]["state"] == "creating":
-                return SandboxResponse(sandbox=None, state="creating")
-            if self.sandbox_metadata[session_hash]["state"] == "ready":
-                return SandboxResponse(
-                    sandbox=self.sandboxes[session_hash], state="ready"
-                )
+            if session_hash in self.sandbox_metadata:
+                state = self.sandbox_metadata[session_hash].get("state")
+                if state == "creating":
+                    return SandboxResponse(sandbox=None, state="creating")
+                if state == "ready" and session_hash in self.sandboxes:
+                    return SandboxResponse(
+                        sandbox=self.sandboxes[session_hash], state="ready"
+                    )
 
+        # If metadata doesn't exist, it means creation failed immediately
+        # Return "creating" anyway as the caller will retry
         return SandboxResponse(sandbox=None, state="creating")
 
     async def release_sandbox(self, session_hash: str):
@@ -151,8 +203,14 @@ class SandboxService:
                 print(f"Releasing sandbox for session {session_hash}")
                 sandbox_to_kill = self.sandboxes[session_hash]
                 del self.sandboxes[session_hash]
-                if session_hash in self.sandbox_metadata:
-                    del self.sandbox_metadata[session_hash]
+            # Always clean up metadata, even if sandbox is still in "creating" state
+            if session_hash in self.sandbox_metadata:
+                state = self.sandbox_metadata[session_hash].get("state")
+                if state == "creating":
+                    print(
+                        f"Cleaning up stuck 'creating' sandbox for session {session_hash}"
+                    )
+                del self.sandbox_metadata[session_hash]
 
         # Kill sandbox outside of lock
         if sandbox_to_kill:
@@ -160,6 +218,44 @@ class SandboxService:
                 await asyncio.to_thread(sandbox_to_kill.kill)
             except Exception as e:
                 print(f"Error killing sandbox for session {session_hash}: {str(e)}")
+
+    async def cleanup_stuck_creating_sandboxes(self):
+        """Clean up sandboxes that have been stuck in 'creating' state for too long"""
+        current_time = datetime.now()
+        stuck_sandboxes_to_kill = []
+
+        async with self.sandbox_lock:
+            for session_hash, metadata in list(self.sandbox_metadata.items()):
+                if metadata.get("state") == "creating":
+                    created_at = metadata.get("created_at")
+                    if (
+                        created_at
+                        and (current_time - created_at).total_seconds()
+                        > SANDBOX_CREATION_MAX_TIME
+                    ):
+                        print(
+                            f"Cleaning up stuck 'creating' sandbox for session {session_hash} "
+                            f"(stuck for {(current_time - created_at).total_seconds():.1f}s)"
+                        )
+                        # Collect sandbox to kill if it exists
+                        if session_hash in self.sandboxes:
+                            stuck_sandboxes_to_kill.append(
+                                (session_hash, self.sandboxes[session_hash])
+                            )
+                            del self.sandboxes[session_hash]
+                        del self.sandbox_metadata[session_hash]
+
+        # Kill stuck sandboxes outside of lock
+        for session_hash, sandbox in stuck_sandboxes_to_kill:
+            try:
+                await asyncio.to_thread(sandbox.kill)
+                print(f"Killed stuck sandbox for session {session_hash}")
+            except Exception as e:
+                print(
+                    f"Error killing stuck sandbox for session {session_hash}: {str(e)}"
+                )
+
+        return len(stuck_sandboxes_to_kill)
 
     async def cleanup_sandboxes(self):
         sandboxes_to_kill = []

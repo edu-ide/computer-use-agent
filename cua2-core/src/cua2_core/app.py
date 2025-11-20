@@ -29,6 +29,9 @@ async def lifespan(app: FastAPI):
 
     agent_service = AgentService(websocket_manager, sandbox_service, num_workers)
 
+    # Start periodic cleanup of stuck sandboxes
+    sandbox_service.start_periodic_cleanup()
+
     # Store services in app state for access in routes
     app.state.websocket_manager = websocket_manager
     app.state.sandbox_service = sandbox_service
@@ -39,6 +42,7 @@ async def lifespan(app: FastAPI):
     yield
 
     print("Shutting down services...")
+    sandbox_service.stop_periodic_cleanup()
     await agent_service.cleanup()
     await sandbox_service.cleanup_sandboxes()
     print("Services shut down successfully")
