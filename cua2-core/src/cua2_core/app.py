@@ -21,7 +21,7 @@ async def lifespan(app: FastAPI):
     if not os.getenv("HF_TOKEN"):
         raise ValueError("HF_TOKEN is not set")
 
-    num_workers = int(os.getenv("NUM_WORKERS", "12"))
+    num_workers = int(os.getenv("NUM_WORKERS", "1"))
     max_sandboxes = int(600 / num_workers)
 
     websocket_manager = WebSocketManager()
