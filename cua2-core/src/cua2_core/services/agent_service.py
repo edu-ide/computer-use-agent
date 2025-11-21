@@ -45,7 +45,7 @@ class AgentService:
         self,
         websocket_manager: WebSocketManager,
         sandbox_service: SandboxService,
-        num_workers: int,
+        max_sandboxes: int,
     ):
         self.active_tasks: dict[str, ActiveTask] = {}
         self.websocket_manager: WebSocketManager = websocket_manager
@@ -53,7 +53,7 @@ class AgentService:
         self.sandbox_service: SandboxService = sandbox_service
         self.last_screenshot: dict[str, tuple[Image.Image, str] | None] = {}
         self._lock = asyncio.Lock()
-        self.max_sandboxes = int(600 / num_workers)
+        self.max_sandboxes = max_sandboxes
         self._archival_lock_file: IO[str] | None = None
 
         # Initialize archival service in dedicated process
@@ -296,141 +296,161 @@ class AgentService:
             # Update archival service after task removal
             self._update_archival_active_tasks()
 
-            # Release sandbox back to the pool
-            if sandbox:
+            # Always release sandbox back to the pool, even if it's still in "creating" state
+            # This handles cases where acquire_sandbox was called but sandbox never became ready
+            try:
                 await self.sandbox_service.release_sandbox(message_id)
+            except Exception as e:
+                logger.error(
+                    f"Error releasing sandbox for {message_id}: {e}", exc_info=True
+                )
 
     async def _agent_processing(
         self,
         message_id: str,
     ):
         """Process the user task with the appropriate agent"""
+        try:
+            # Set up log file for this task
+            active_task = self.active_tasks[message_id]
 
-        # Set up log file for this task
-        active_task = self.active_tasks[message_id]
+            # Ensure the directory exists
+            os.makedirs(active_task.trace_path, exist_ok=True)
 
-        # Ensure the directory exists
-        os.makedirs(active_task.trace_path, exist_ok=True)
+            # Capture the event loop reference in the async context
+            # This will be used in the callback to safely schedule coroutines from the worker thread
+            loop = asyncio.get_running_loop()
 
-        # Capture the event loop reference in the async context
-        # This will be used in the callback to safely schedule coroutines from the worker thread
-        loop = asyncio.get_running_loop()
+            def step_callback(memory_step: ActionStep, agent: E2BVisionAgent):
+                assert memory_step.step_number is not None
 
-        def step_callback(memory_step: ActionStep, agent: E2BVisionAgent):
-            assert memory_step.step_number is not None
+                if memory_step.step_number > agent.max_steps:
+                    raise AgentStopException("Max steps reached")
 
-            if memory_step.step_number > agent.max_steps:
-                raise AgentStopException("Max steps reached")
+                if self.active_tasks[message_id].traceMetadata.completed:
+                    raise AgentStopException("Task not completed")
 
-            if self.active_tasks[message_id].traceMetadata.completed:
-                raise AgentStopException("Task not completed")
-
-            model_output = (
-                memory_step.model_output_message.content
-                if memory_step.model_output_message
-                else None
-            )
-            if isinstance(memory_step.error, AgentMaxStepsError):
-                model_output = memory_step.action_output
-
-            thought = (
-                model_output.split("```")[0].replace("\nAction:\n", "")
-                if model_output
-                and (
-                    memory_step.error is None
-                    or isinstance(memory_step.error, AgentMaxStepsError)
+                model_output = (
+                    memory_step.model_output_message.content
+                    if memory_step.model_output_message
+                    else None
                 )
-                else None
-            )
+                if isinstance(memory_step.error, AgentMaxStepsError):
+                    model_output = memory_step.action_output
 
-            if model_output is not None:
-                action_sequence = model_output.split("```")[1]
-            else:
-                action_sequence = (
-                    """The task failed due to an error"""  # TODO: To Handle in front
-                )
-
-            agent_actions = (
-                AgentAction.from_function_calls(parse_function_call(action_sequence))
-                if action_sequence
-                else None
-            )
-
-            # if not (
-            #     agent_actions is not None
-            #     and not any(action.function_name == "wait" for action in agent_actions)
-            # ):
-            time.sleep(3)
-
-            image, step_filename = self.last_screenshot[message_id]  # type: ignore
-            assert image is not None and step_filename is not None
-            screenshot_path = os.path.join(agent.data_dir, f"{step_filename}.png")
-            image.save(screenshot_path)
-
-            buffered = BytesIO()
-            image.save(buffered, format="PNG")
-            image_base64 = f"data:image/png;base64,{base64.b64encode(buffered.getvalue()).decode('utf-8')}"
-            del buffered
-            del image
-
-            if memory_step.token_usage is not None:
-                step = AgentStep(
-                    traceId=message_id,
-                    stepId=str(memory_step.step_number),
-                    image=image_base64,
-                    thought=thought,
-                    actions=agent_actions,
-                    error=memory_step.error.message if memory_step.error else None,
-                    duration=memory_step.timing.duration,
-                    inputTokensUsed=memory_step.token_usage.input_tokens,
-                    outputTokensUsed=memory_step.token_usage.output_tokens,
-                    step_evaluation="neutral",
-                )
-
-                self.active_tasks[message_id].update_trace_metadata(
-                    step_input_tokens_used=memory_step.token_usage.input_tokens,
-                    step_output_tokens_used=memory_step.token_usage.output_tokens,
-                    step_duration=memory_step.timing.duration,
-                    step_numberOfSteps=1,
-                )
-
-                self.active_tasks[message_id].update_step(step)
-
-                websocket = self.task_websockets.get(message_id)
-                if websocket and websocket.client_state == WebSocketState.CONNECTED:
-                    future = asyncio.run_coroutine_threadsafe(
-                        self.websocket_manager.send_agent_progress(
-                            step=step,
-                            metadata=self.active_tasks[message_id].traceMetadata,
-                            websocket=websocket,
-                        ),
-                        loop,
+                thought = (
+                    model_output.split("```")[0].replace("\nAction:\n", "")
+                    if model_output
+                    and (
+                        memory_step.error is None
+                        or isinstance(memory_step.error, AgentMaxStepsError)
                     )
-                    future.result()
+                    else None
+                )
 
-            if self.active_tasks[message_id].traceMetadata.completed:
-                raise AgentStopException("Task not completed")
+                if model_output is not None:
+                    action_sequence = model_output.split("```")[1]
+                else:
+                    action_sequence = """The task failed due to an error"""  # TODO: To Handle in front
 
-            step_filename = f"{message_id}-{memory_step.step_number + 1}"
-            screenshot_bytes = agent.desktop.screenshot()
-            original_image = Image.open(BytesIO(screenshot_bytes))
-            image = compress_image_to_max_size(original_image, max_size_kb=500)
-            del original_image
+                agent_actions = (
+                    AgentAction.from_function_calls(
+                        parse_function_call(action_sequence)
+                    )
+                    if action_sequence
+                    else None
+                )
 
-            for previous_memory_step in (
-                agent.memory.steps
-            ):  # Remove previous screenshots from logs for lean processing
-                if isinstance(previous_memory_step, ActionStep):
-                    previous_memory_step.observations_images = None
-                elif isinstance(previous_memory_step, TaskStep):
-                    previous_memory_step.task_images = None
+                # if not (
+                #     agent_actions is not None
+                #     and not any(action.function_name == "wait" for action in agent_actions)
+                # ):
+                time.sleep(3)
 
-            memory_step.observations_images = [image.copy()]
+                image, step_filename = self.last_screenshot[message_id]  # type: ignore
+                assert image is not None and step_filename is not None
+                screenshot_path = os.path.join(agent.data_dir, f"{step_filename}.png")
+                image.save(screenshot_path)
 
-            del self.last_screenshot[message_id]
-            self.last_screenshot[message_id] = (image, step_filename)
+                buffered = BytesIO()
+                image.save(buffered, format="PNG")
+                image_base64 = f"data:image/png;base64,{base64.b64encode(buffered.getvalue()).decode('utf-8')}"
+                del buffered
+                del image
 
-        await self._agent_runner(message_id, step_callback)
+                if memory_step.token_usage is not None:
+                    step = AgentStep(
+                        traceId=message_id,
+                        stepId=str(memory_step.step_number),
+                        image=image_base64,
+                        thought=thought,
+                        actions=agent_actions,
+                        error=memory_step.error.message if memory_step.error else None,
+                        duration=memory_step.timing.duration,
+                        inputTokensUsed=memory_step.token_usage.input_tokens,
+                        outputTokensUsed=memory_step.token_usage.output_tokens,
+                        step_evaluation="neutral",
+                    )
+
+                    self.active_tasks[message_id].update_trace_metadata(
+                        step_input_tokens_used=memory_step.token_usage.input_tokens,
+                        step_output_tokens_used=memory_step.token_usage.output_tokens,
+                        step_duration=memory_step.timing.duration,
+                        step_numberOfSteps=1,
+                    )
+
+                    self.active_tasks[message_id].update_step(step)
+
+                    websocket = self.task_websockets.get(message_id)
+                    if websocket and websocket.client_state == WebSocketState.CONNECTED:
+                        future = asyncio.run_coroutine_threadsafe(
+                            self.websocket_manager.send_agent_progress(
+                                step=step,
+                                metadata=self.active_tasks[message_id].traceMetadata,
+                                websocket=websocket,
+                            ),
+                            loop,
+                        )
+                        future.result()
+
+                if self.active_tasks[message_id].traceMetadata.completed:
+                    raise AgentStopException("Task not completed")
+
+                step_filename = f"{message_id}-{memory_step.step_number + 1}"
+                screenshot_bytes = agent.desktop.screenshot()
+                original_image = Image.open(BytesIO(screenshot_bytes))
+                image = compress_image_to_max_size(original_image, max_size_kb=500)
+                del original_image
+
+                for previous_memory_step in (
+                    agent.memory.steps
+                ):  # Remove previous screenshots from logs for lean processing
+                    if isinstance(previous_memory_step, ActionStep):
+                        previous_memory_step.observations_images = None
+                    elif isinstance(previous_memory_step, TaskStep):
+                        previous_memory_step.task_images = None
+
+                memory_step.observations_images = [image.copy()]
+
+                del self.last_screenshot[message_id]
+                self.last_screenshot[message_id] = (image, step_filename)
+
+            await self._agent_runner(message_id, step_callback)
+        except Exception as e:
+            # If _agent_processing fails before _agent_runner is called,
+            # we still need to release the sandbox that was acquired in create_id_and_sandbox
+            logger.error(
+                f"Error in _agent_processing for {message_id}: {e}", exc_info=True
+            )
+            try:
+                await self.sandbox_service.release_sandbox(message_id)
+            except Exception as release_error:
+                logger.error(
+                    f"Error releasing sandbox in _agent_processing cleanup for {message_id}: {release_error}",
+                    exc_info=True,
+                )
+            # Re-raise to ensure error is logged
+            raise
 
     def update_trace_step(
         self,
@@ -568,6 +588,9 @@ class AgentService:
         """
         Clean up all tasks associated with a disconnected websocket.
         This will stop the tasks and release their sandboxes.
+
+        Note: This also cleans up sandboxes that were acquired in create_id_and_sandbox
+        but never had a task created (e.g., if websocket disconnects before process_user_task).
         """
         tasks_to_cleanup = []
 
@@ -579,11 +602,13 @@ class AgentService:
                     logger.info(
                         f"Marking task {message_id} for cleanup due to websocket disconnect"
                     )
+                    # Remove from task_websockets immediately to prevent double cleanup
+                    del self.task_websockets[message_id]
 
         # Cleanup each task
         for message_id in tasks_to_cleanup:
             try:
-                # Mark task as completed to stop the agent
+                # Mark task as completed to stop the agent (if task exists)
                 if message_id in self.active_tasks:
                     self.active_tasks[message_id].update_trace_metadata(
                         completed=True,
@@ -592,7 +617,9 @@ class AgentService:
                         f"Stopped task {message_id} due to websocket disconnect"
                     )
 
-                # Release the sandbox immediately
+                # Always release the sandbox, even if no task was created
+                # This handles the case where create_id_and_sandbox succeeded but
+                # process_user_task was never called
                 await self.sandbox_service.release_sandbox(message_id)
                 logger.info(
                     f"Released sandbox for task {message_id} due to websocket disconnect"

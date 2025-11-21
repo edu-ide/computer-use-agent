@@ -21,9 +21,10 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket_manager.connect(websocket)
 
     try:
-        welcome_message = HeartbeatEvent(
-            uuid=await agent_service.create_id_and_sandbox(websocket)
-        )
+        # Create ID and acquire sandbox - this adds uuid to task_websockets
+        # If this fails, the finally block will clean up via cleanup_tasks_for_websocket
+        uuid = await agent_service.create_id_and_sandbox(websocket)
+        welcome_message = HeartbeatEvent(uuid=uuid)
         await websocket_manager.send_message(welcome_message, websocket)
 
         # Keep the connection alive and wait for messages

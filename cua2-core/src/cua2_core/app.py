@@ -21,13 +21,14 @@ async def lifespan(app: FastAPI):
     if not os.getenv("HF_TOKEN"):
         raise ValueError("HF_TOKEN is not set")
 
-    num_workers = int(os.getenv("NUM_WORKERS", "1"))
+    num_workers = int(os.getenv("NUM_WORKERS", "12"))
+    max_sandboxes = int(600 / num_workers)
 
     websocket_manager = WebSocketManager()
 
-    sandbox_service = SandboxService()
+    sandbox_service = SandboxService(max_sandboxes=max_sandboxes)
 
-    agent_service = AgentService(websocket_manager, sandbox_service, num_workers)
+    agent_service = AgentService(websocket_manager, sandbox_service, max_sandboxes)
 
     # Start periodic cleanup of stuck sandboxes
     sandbox_service.start_periodic_cleanup()
