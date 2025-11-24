@@ -184,16 +184,37 @@ class AgentService:
 
             model = get_model(self.active_tasks[message_id].model_id)
 
-            max_attempts = 20
-            for _ in range(max_attempts):
+            # Wait for sandbox to be ready (it was already acquired in create_id_and_sandbox)
+            max_attempts = 60  # Increased timeout to 2 minutes (60 * 2s)
+            for attempt in range(max_attempts):
                 response = await self.sandbox_service.acquire_sandbox(message_id)
                 if response.sandbox is not None and response.state == "ready":
                     sandbox = response.sandbox
                     break
                 elif response.state == "max_sandboxes_reached":
-                    raise Exception("No sandbox available: pool limit reached")
+                    # Trigger cleanup of stuck and expired sandboxes before giving up
+                    logger.warning(
+                        f"Sandbox pool limit reached for {message_id}, attempting cleanup of stuck/expired sandboxes"
+                    )
+                    await self.sandbox_service.cleanup_stuck_creating_sandboxes()
+                    await self.sandbox_service.cleanup_expired_ready_sandboxes()
+                    # Try one more time after cleanup
+                    response = await self.sandbox_service.acquire_sandbox(message_id)
+                    if response.sandbox is not None and response.state == "ready":
+                        sandbox = response.sandbox
+                        break
+                    elif response.state == "max_sandboxes_reached":
+                        raise Exception("No sandbox available: pool limit reached")
+                # Log progress every 10 attempts
+                if attempt > 0 and attempt % 10 == 0:
+                    logger.info(
+                        f"Waiting for sandbox for {message_id}, attempt {attempt}/{max_attempts}, state: {response.state}"
+                    )
                 await asyncio.sleep(2)
             if sandbox is None:
+                # Final cleanup attempt before raising error
+                await self.sandbox_service.cleanup_stuck_creating_sandboxes()
+                await self.sandbox_service.cleanup_expired_ready_sandboxes()
                 raise Exception("No sandbox available: pool limit reached")
 
             data_dir = self.active_tasks[message_id].trace_path
