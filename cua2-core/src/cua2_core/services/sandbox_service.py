@@ -363,6 +363,22 @@ class SandboxService:
 
         return len(expired_sandboxes_to_kill)
 
+    async def get_sandbox_counts(self) -> tuple[int, int]:
+        """
+        Get the count of available (ready) and non-available (creating) sandboxes.
+
+        Returns:
+            Tuple of (available_count, non_available_count)
+        """
+        async with self.sandbox_lock:
+            ready_count = len(self.sandboxes)
+            creating_count = sum(
+                1
+                for meta in self.sandbox_metadata.values()
+                if meta.get("state") == "creating"
+            )
+            return (ready_count, creating_count)
+
     async def cleanup_sandboxes(self):
         sandboxes_to_kill = []
 

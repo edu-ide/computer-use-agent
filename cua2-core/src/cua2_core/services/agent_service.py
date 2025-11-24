@@ -204,7 +204,13 @@ class AgentService:
                         sandbox = response.sandbox
                         break
                     elif response.state == "max_sandboxes_reached":
-                        raise Exception("No sandbox available: pool limit reached")
+                        (
+                            available_count,
+                            non_available_count,
+                        ) = await self.sandbox_service.get_sandbox_counts()
+                        raise Exception(
+                            f"No sandbox available: pool limit reached (available: {available_count}, non-available: {non_available_count}, max: {self.max_sandboxes})"
+                        )
                 # Log progress every 10 attempts
                 if attempt > 0 and attempt % 10 == 0:
                     logger.info(
@@ -215,7 +221,13 @@ class AgentService:
                 # Final cleanup attempt before raising error
                 await self.sandbox_service.cleanup_stuck_creating_sandboxes()
                 await self.sandbox_service.cleanup_expired_ready_sandboxes()
-                raise Exception("No sandbox available: pool limit reached")
+                (
+                    available_count,
+                    non_available_count,
+                ) = await self.sandbox_service.get_sandbox_counts()
+                raise Exception(
+                    f"No sandbox available: pool limit reached (available: {available_count}, non-available: {non_available_count}, max: {self.max_sandboxes})"
+                )
 
             data_dir = self.active_tasks[message_id].trace_path
             user_content = self.active_tasks[message_id].instruction
