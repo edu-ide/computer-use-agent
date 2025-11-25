@@ -127,10 +127,32 @@ class AgentService:
         trace.steps = []
         trace.traceMetadata = AgentTraceMetadata(traceId=trace_id)
 
+        trace_id_to_release = None
         async with self._lock:
             if self.task_websockets[trace_id] != websocket:
-                raise WebSocketException("WebSocket mismatch")
+                # Release sandbox before raising exception to prevent leak
+                # Do this outside the lock to avoid deadlock
+                trace_id_to_release = trace_id
+                # Remove from task_websockets since we're rejecting this
+                if trace_id in self.task_websockets:
+                    del self.task_websockets[trace_id]
 
+        # Release sandbox outside of lock if there was a mismatch
+        if trace_id_to_release:
+            try:
+                await self.sandbox_service.release_sandbox(trace_id_to_release)
+                logger.info(
+                    f"Released sandbox for {trace_id_to_release} due to WebSocket mismatch"
+                )
+            except Exception as e:
+                logger.error(
+                    f"Error releasing sandbox for {trace_id_to_release}: {e}",
+                    exc_info=True,
+                )
+            raise WebSocketException("WebSocket mismatch")
+
+        # Continue with normal processing if no mismatch
+        async with self._lock:
             active_task = ActiveTask(
                 message_id=trace_id,
                 instruction=trace.instruction,
@@ -184,83 +206,67 @@ class AgentService:
 
             model = get_model(self.active_tasks[message_id].model_id)
 
-            # Wait for sandbox to be ready (it was already acquired in create_id_and_sandbox)
-            max_attempts = 60  # Increased timeout to 2 minutes (60 * 2s)
-            last_state = None
+            # Wait for sandbox to be ready
+            max_attempts = 60  # 2 minutes timeout (60 * 2s)
+            sandbox = None
             for attempt in range(max_attempts):
                 response = await self.sandbox_service.acquire_sandbox(message_id)
-                last_state = response.state
+
+                # Check for creation errors
+                if response.error:
+                    logger.error(
+                        f"Sandbox creation failed for {message_id}: {response.error}",
+                        exc_info=False,
+                    )
+                    # Continue retrying - might succeed on next attempt
+                    await asyncio.sleep(2)
+                    continue
+
                 if response.sandbox is not None and response.state == "ready":
                     sandbox = response.sandbox
                     break
-                elif response.state == "max_sandboxes_reached":
-                    # Trigger cleanup of stuck and expired sandboxes before giving up
+
+                if response.state == "max_sandboxes_reached":
+                    # Service handles cleanup automatically, but log the state
+                    (
+                        available_count,
+                        pending_count,
+                    ) = await self.sandbox_service.get_sandbox_counts()
                     logger.warning(
-                        f"Sandbox pool limit reached for {message_id}, attempting cleanup of stuck/expired sandboxes"
+                        f"Sandbox pool at capacity for {message_id}: "
+                        f"{available_count} ready, {pending_count} pending, max: {self.max_sandboxes}"
                     )
-                    cleaned_creating = (
-                        await self.sandbox_service.cleanup_stuck_creating_sandboxes()
-                    )
-                    cleaned_expired = (
-                        await self.sandbox_service.cleanup_expired_ready_sandboxes()
-                    )
-                    logger.info(
-                        f"Cleanup completed: removed {cleaned_creating} stuck creating + {cleaned_expired} expired ready sandboxes"
-                    )
-                    # Try one more time after cleanup
-                    response = await self.sandbox_service.acquire_sandbox(message_id)
-                    last_state = response.state
-                    if response.sandbox is not None and response.state == "ready":
-                        sandbox = response.sandbox
-                        break
-                    elif response.state == "max_sandboxes_reached":
-                        (
-                            available_count,
-                            non_available_count,
-                        ) = await self.sandbox_service.get_sandbox_counts()
-                        raise Exception(
-                            f"No sandbox available: pool limit reached (available: {available_count}, non-available: {non_available_count}, max: {self.max_sandboxes})"
-                        )
+                    # Wait a bit and retry - cleanup may free up space
+                    await asyncio.sleep(2)
+                    continue
+
                 # Log progress every 10 attempts
                 if attempt > 0 and attempt % 10 == 0:
                     logger.info(
                         f"Waiting for sandbox for {message_id}, attempt {attempt}/{max_attempts}, state: {response.state}"
                     )
+
                 await asyncio.sleep(2)
 
-            # If sandbox is still None after all attempts, do final cleanup and check
+            # Check if we got a sandbox
             if sandbox is None:
-                logger.warning(
-                    f"Sandbox for {message_id} still not ready after {max_attempts} attempts (last state: {last_state}), performing final cleanup"
-                )
-                # Final cleanup attempt before raising error - be more aggressive
-                cleaned_creating = (
-                    await self.sandbox_service.cleanup_stuck_creating_sandboxes()
-                )
-                cleaned_expired = (
-                    await self.sandbox_service.cleanup_expired_ready_sandboxes()
-                )
-                logger.info(
-                    f"Final cleanup: removed {cleaned_creating} stuck creating + {cleaned_expired} expired ready sandboxes"
-                )
-
-                # Try one last time after cleanup
                 (
                     available_count,
-                    non_available_count,
+                    pending_count,
                 ) = await self.sandbox_service.get_sandbox_counts()
-                # Provide more detailed error message
-                error_msg = (
-                    f"No sandbox available for {message_id}: "
-                    f"available: {available_count}, non-available: {non_available_count}, "
-                    f"max: {self.max_sandboxes}, last_state: {last_state}"
-                )
-                if non_available_count > 0:
-                    error_msg += (
-                        f". There are {non_available_count} sandbox(s) stuck in 'creating' state "
-                        f"that may need manual cleanup or the cleanup threshold may be too high."
+                # Check for any final errors
+                final_response = await self.sandbox_service.acquire_sandbox(message_id)
+                error_info = ""
+                if final_response.error:
+                    error_info = f" Last creation error: {final_response.error}"
+                    logger.error(
+                        f"Sandbox creation failed for {message_id} after {max_attempts} attempts: {final_response.error}",
+                        exc_info=False,
                     )
-                raise Exception(error_msg)
+                raise Exception(
+                    f"No sandbox available for {message_id} after {max_attempts} attempts: "
+                    f"{available_count} ready, {pending_count} pending, max: {self.max_sandboxes}.{error_info}"
+                )
 
             data_dir = self.active_tasks[message_id].trace_path
             user_content = self.active_tasks[message_id].instruction
@@ -317,9 +323,14 @@ class AgentService:
                 f"Error processing task: {traceback.format_exc()}", exc_info=True
             )
             final_state = "error"
-            await self.websocket_manager.send_agent_error(
-                error="Error processing task", websocket=websocket
-            )
+            if (
+                not websocket_exception
+                and websocket
+                and websocket.client_state == WebSocketState.CONNECTED
+            ):
+                await self.websocket_manager.send_agent_error(
+                    error="Error processing task", websocket=websocket
+                )
 
         finally:
             # Send completion event
