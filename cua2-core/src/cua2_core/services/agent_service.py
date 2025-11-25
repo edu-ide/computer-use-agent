@@ -186,8 +186,10 @@ class AgentService:
 
             # Wait for sandbox to be ready (it was already acquired in create_id_and_sandbox)
             max_attempts = 60  # Increased timeout to 2 minutes (60 * 2s)
+            last_state = None
             for attempt in range(max_attempts):
                 response = await self.sandbox_service.acquire_sandbox(message_id)
+                last_state = response.state
                 if response.sandbox is not None and response.state == "ready":
                     sandbox = response.sandbox
                     break
@@ -196,10 +198,18 @@ class AgentService:
                     logger.warning(
                         f"Sandbox pool limit reached for {message_id}, attempting cleanup of stuck/expired sandboxes"
                     )
-                    await self.sandbox_service.cleanup_stuck_creating_sandboxes()
-                    await self.sandbox_service.cleanup_expired_ready_sandboxes()
+                    cleaned_creating = (
+                        await self.sandbox_service.cleanup_stuck_creating_sandboxes()
+                    )
+                    cleaned_expired = (
+                        await self.sandbox_service.cleanup_expired_ready_sandboxes()
+                    )
+                    logger.info(
+                        f"Cleanup completed: removed {cleaned_creating} stuck creating + {cleaned_expired} expired ready sandboxes"
+                    )
                     # Try one more time after cleanup
                     response = await self.sandbox_service.acquire_sandbox(message_id)
+                    last_state = response.state
                     if response.sandbox is not None and response.state == "ready":
                         sandbox = response.sandbox
                         break
@@ -217,17 +227,40 @@ class AgentService:
                         f"Waiting for sandbox for {message_id}, attempt {attempt}/{max_attempts}, state: {response.state}"
                     )
                 await asyncio.sleep(2)
+
+            # If sandbox is still None after all attempts, do final cleanup and check
             if sandbox is None:
-                # Final cleanup attempt before raising error
-                await self.sandbox_service.cleanup_stuck_creating_sandboxes()
-                await self.sandbox_service.cleanup_expired_ready_sandboxes()
+                logger.warning(
+                    f"Sandbox for {message_id} still not ready after {max_attempts} attempts (last state: {last_state}), performing final cleanup"
+                )
+                # Final cleanup attempt before raising error - be more aggressive
+                cleaned_creating = (
+                    await self.sandbox_service.cleanup_stuck_creating_sandboxes()
+                )
+                cleaned_expired = (
+                    await self.sandbox_service.cleanup_expired_ready_sandboxes()
+                )
+                logger.info(
+                    f"Final cleanup: removed {cleaned_creating} stuck creating + {cleaned_expired} expired ready sandboxes"
+                )
+
+                # Try one last time after cleanup
                 (
                     available_count,
                     non_available_count,
                 ) = await self.sandbox_service.get_sandbox_counts()
-                raise Exception(
-                    f"No sandbox available: pool limit reached (available: {available_count}, non-available: {non_available_count}, max: {self.max_sandboxes})"
+                # Provide more detailed error message
+                error_msg = (
+                    f"No sandbox available for {message_id}: "
+                    f"available: {available_count}, non-available: {non_available_count}, "
+                    f"max: {self.max_sandboxes}, last_state: {last_state}"
                 )
+                if non_available_count > 0:
+                    error_msg += (
+                        f". There are {non_available_count} sandbox(s) stuck in 'creating' state "
+                        f"that may need manual cleanup or the cleanup threshold may be too high."
+                    )
+                raise Exception(error_msg)
 
             data_dir = self.active_tasks[message_id].trace_path
             user_content = self.active_tasks[message_id].instruction

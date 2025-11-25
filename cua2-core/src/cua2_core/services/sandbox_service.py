@@ -9,9 +9,11 @@ from pydantic import BaseModel
 
 SANDBOX_METADATA: dict[str, dict[str, Any]] = {}
 SANDBOX_TIMEOUT = 500
-SANDBOX_CREATION_TIMEOUT = 200
+SANDBOX_READY_TIMEOUT = 200
 SANDBOX_CREATION_MAX_TIME = (
-    120  # Maximum time a sandbox can be in "creating" state (2 minutes, reduced from 5)
+    90  # Maximum time a sandbox can be in "creating" state (90 seconds)
+    # Reduced from 120 to be more aggressive and clean up stuck sandboxes
+    # before the agent_service loop times out (which waits 60 attempts * 2s = 120s)
 )
 WIDTH = 1280
 HEIGHT = 960
@@ -167,7 +169,7 @@ class SandboxService:
                 and (
                     current_time - self.sandbox_metadata[session_hash]["created_at"]
                 ).total_seconds()
-                < SANDBOX_CREATION_TIMEOUT
+                < SANDBOX_READY_TIMEOUT
             ):
                 print(f"Reusing Sandbox for session {session_hash}")
                 self.sandbox_metadata[session_hash]["last_accessed"] = current_time
@@ -180,8 +182,58 @@ class SandboxService:
                 session_hash in self.sandbox_metadata
                 and self.sandbox_metadata[session_hash].get("state") == "creating"
             ):
-                print(f"Sandbox for session {session_hash} is already being created")
-                return SandboxResponse(sandbox=None, state="creating")
+                # Check if this sandbox has been stuck in "creating" state for too long
+                created_at = self.sandbox_metadata[session_hash].get("created_at")
+                if created_at:
+                    stuck_duration = (current_time - created_at).total_seconds()
+                    if stuck_duration > SANDBOX_CREATION_MAX_TIME:
+                        # This sandbox is stuck - clean it up immediately
+                        print(
+                            f"Sandbox for session {session_hash} has been stuck in 'creating' state "
+                            f"for {stuck_duration:.1f}s (threshold: {SANDBOX_CREATION_MAX_TIME}s) - cleaning up"
+                        )
+                        # Remove from metadata and sandboxes dict
+                        if session_hash in self.sandboxes:
+                            # Schedule kill outside of lock with error handling
+                            stuck_sandbox = self.sandboxes[session_hash]
+                            del self.sandboxes[session_hash]
+
+                            async def kill_stuck():
+                                try:
+                                    await asyncio.to_thread(stuck_sandbox.kill)
+                                except Exception as e:
+                                    print(
+                                        f"Error killing stuck sandbox for {session_hash}: {str(e)}"
+                                    )
+
+                            asyncio.create_task(kill_stuck())
+                        del self.sandbox_metadata[session_hash]
+                        # Fall through to create a new sandbox
+                    else:
+                        print(
+                            f"Sandbox for session {session_hash} is already being created"
+                        )
+                        return SandboxResponse(sandbox=None, state="creating")
+                else:
+                    # Missing created_at - corrupted metadata, clean it up
+                    print(
+                        f"WARNING: Sandbox {session_hash} in 'creating' state has no 'created_at' - cleaning up"
+                    )
+                    if session_hash in self.sandboxes:
+                        stuck_sandbox = self.sandboxes[session_hash]
+                        del self.sandboxes[session_hash]
+
+                        async def kill_stuck():
+                            try:
+                                await asyncio.to_thread(stuck_sandbox.kill)
+                            except Exception as e:
+                                print(
+                                    f"Error killing stuck sandbox for {session_hash}: {str(e)}"
+                                )
+
+                        asyncio.create_task(kill_stuck())
+                    del self.sandbox_metadata[session_hash]
+                    # Fall through to create a new sandbox
 
             # Mark expired sandbox for cleanup (remove from dict within lock)
             if session_hash in self.sandboxes:
@@ -298,14 +350,28 @@ class SandboxService:
             for session_hash, metadata in list(self.sandbox_metadata.items()):
                 if metadata.get("state") == "creating":
                     created_at = metadata.get("created_at")
-                    if (
-                        created_at
-                        and (current_time - created_at).total_seconds()
-                        > SANDBOX_CREATION_MAX_TIME
-                    ):
+                    # Clean up if:
+                    # 1. created_at exists and is older than threshold, OR
+                    # 2. created_at is missing (corrupted metadata - should never happen but handle it)
+                    should_cleanup = False
+                    stuck_duration = 0.0
+
+                    if created_at:
+                        stuck_duration = (current_time - created_at).total_seconds()
+                        if stuck_duration > SANDBOX_CREATION_MAX_TIME:
+                            should_cleanup = True
+                    else:
+                        # Missing created_at is a bug, but clean it up anyway
+                        print(
+                            f"WARNING: Sandbox {session_hash} in 'creating' state has no 'created_at' timestamp - cleaning up"
+                        )
+                        should_cleanup = True
+                        stuck_duration = float("inf")
+
+                    if should_cleanup:
                         print(
                             f"Cleaning up stuck 'creating' sandbox for session {session_hash} "
-                            f"(stuck for {(current_time - created_at).total_seconds():.1f}s)"
+                            f"(stuck for {stuck_duration:.1f}s)"
                         )
                         # Collect sandbox to kill if it exists
                         if session_hash in self.sandboxes:
@@ -339,7 +405,7 @@ class SandboxService:
                     if (
                         created_at
                         and (current_time - created_at).total_seconds()
-                        >= SANDBOX_CREATION_TIMEOUT
+                        >= SANDBOX_READY_TIMEOUT
                     ):
                         print(
                             f"Cleaning up expired ready sandbox for session {session_hash} "
