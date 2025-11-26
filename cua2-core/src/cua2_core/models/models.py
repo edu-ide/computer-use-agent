@@ -42,7 +42,7 @@ class AgentAction(FunctionCall):
         if action_type == "double_click":
             x = args.get("x") or args.get("arg_0")
             y = args.get("y") or args.get("arg_1")
-            return f"Right click at coordinates ({x}, {y})"
+            return f"Double click at coordinates ({x}, {y})"
 
         if action_type == "move_mouse":
             x = args.get("x") or args.get("arg_0")
