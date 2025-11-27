@@ -158,10 +158,14 @@ class SandboxService:
                     asyncio.create_task(self._kill_sandbox_safe(desktop, session_hash))
                     return
 
-                # Check capacity before adding
-                if len(self.sandboxes) >= self.max_sandboxes:
+                # Check total capacity before adding (sandboxes + other pending creations)
+                # Note: We already removed this session_hash from pending, so we check
+                # if adding it to sandboxes would exceed capacity
+                total_count = len(self.sandboxes) + len(self.pending)
+                if total_count >= self.max_sandboxes:
                     print(
-                        f"Pool at capacity, killing newly created sandbox for {session_hash}"
+                        f"Pool at capacity ({total_count}/{self.max_sandboxes}), "
+                        f"killing newly created sandbox for {session_hash}"
                     )
                     asyncio.create_task(self._kill_sandbox_safe(desktop, session_hash))
                     return

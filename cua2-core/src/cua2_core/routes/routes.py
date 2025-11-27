@@ -74,7 +74,7 @@ async def update_trace_step(
 ):
     """Update a specific step in a trace (e.g., update step evaluation)"""
     try:
-        agent_service.update_trace_step(
+        await agent_service.update_trace_step(
             trace_id=trace_id,
             step_id=step_id,
             step_evaluation=request.step_evaluation,
@@ -99,7 +99,7 @@ async def update_trace_evaluation(
 ):
     """Update the user evaluation for a trace (overall task feedback)"""
     try:
-        agent_service.update_trace_evaluation(
+        await agent_service.update_trace_evaluation(
             trace_id=trace_id,
             user_evaluation=request.user_evaluation,
         )

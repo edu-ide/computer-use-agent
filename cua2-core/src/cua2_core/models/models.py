@@ -1,6 +1,6 @@
+import asyncio
 import json
 import os
-import threading
 from datetime import datetime
 from typing import Annotated, Literal, Optional
 from uuid import uuid4
@@ -269,51 +269,58 @@ class ActiveTask(BaseModel):
     timestamp: datetime = datetime.now()
     steps: list[AgentStep] = []
     traceMetadata: AgentTraceMetadata = AgentTraceMetadata()
-    _file_lock: threading.Lock = PrivateAttr(default_factory=threading.Lock)
+    _file_lock: asyncio.Lock | None = PrivateAttr(default=None)
+
+    def _get_lock(self) -> asyncio.Lock:
+        """Get or create the async lock (lazy initialization)"""
+        if self._file_lock is None:
+            self._file_lock = asyncio.Lock()
+        return self._file_lock
 
     @property
     def trace_path(self):
         """Trace path"""
         return f"data/trace-{self.message_id}-{self.model_id.replace('/', '-')}"
 
+    def _write_to_file_sync(self):
+        """Synchronous file write helper (used in async context via to_thread)"""
+        self.traceMetadata.traceId = self.message_id
+        os.makedirs(self.trace_path, exist_ok=True)
+        with open(f"{self.trace_path}/tasks.json", "w") as f:
+            json.dump(
+                self.model_dump(
+                    mode="json",
+                    exclude={"_file_lock", "_lock_initialized"},
+                    context={"actions_as_json": True, "image_as_path": True},
+                ),
+                f,
+                indent=2,
+            )
+
     @model_validator(mode="after")
     def store_model(self):
-        """Validate model ID"""
-        with self._file_lock:
-            self.traceMetadata.traceId = self.message_id
-            os.makedirs(self.trace_path, exist_ok=True)
-            with open(f"{self.trace_path}/tasks.json", "w") as f:
-                json.dump(
-                    self.model_dump(
-                        mode="json",
-                        exclude={"_file_locks"},
-                        context={"actions_as_json": True, "image_as_path": True},
-                    ),
-                    f,
-                    indent=2,
-                )
+        """Validate model ID - creates directory, but file write is deferred to async method"""
+        self.traceMetadata.traceId = self.message_id
+        os.makedirs(self.trace_path, exist_ok=True)
         return self
 
-    def update_step(self, step: AgentStep):
+    async def save_to_file(self):
+        """Async method to save task data to file"""
+        async with self._get_lock():
+            await asyncio.to_thread(self._write_to_file_sync)
+
+    async def update_step(self, step: AgentStep):
         """Update step"""
-        with self._file_lock:
+        async with self._get_lock():
             if int(step.stepId) <= len(self.steps):
                 self.steps[int(step.stepId) - 1] = step
             else:
                 self.steps.append(step)
                 self.traceMetadata.numberOfSteps = len(self.steps)
-            with open(f"{self.trace_path}/tasks.json", "w") as f:
-                json.dump(
-                    self.model_dump(
-                        mode="json",
-                        exclude={"_file_locks"},
-                        context={"actions_as_json": True, "image_as_path": True},
-                    ),
-                    f,
-                    indent=2,
-                )
+            # Use to_thread for file I/O to avoid blocking
+            await asyncio.to_thread(self._write_to_file_sync)
 
-    def update_trace_metadata(
+    async def update_trace_metadata(
         self,
         step_input_tokens_used: int | None = None,
         step_output_tokens_used: int | None = None,
@@ -327,7 +334,7 @@ class ActiveTask(BaseModel):
         user_evaluation: Literal["success", "failed", "not_evaluated"] | None = None,
     ):
         """Update trace metadata"""
-        with self._file_lock:
+        async with self._get_lock():
             if step_input_tokens_used is not None:
                 self.traceMetadata.inputTokensUsed += step_input_tokens_used
             if step_output_tokens_used is not None:

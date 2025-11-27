@@ -1,4 +1,4 @@
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from cua2_core.models.models import AvailableModelsResponse, UpdateStepResponse
@@ -15,7 +15,9 @@ def mock_agent_service():
     """Fixture to create a mocked AgentService"""
     service = Mock(spec=AgentService)
     service.active_tasks = {}
-    service.update_trace_step = Mock()
+    # update_trace_step is now async, so use AsyncMock
+    service.update_trace_step = AsyncMock(return_value=None)
+    service.update_trace_evaluation = AsyncMock(return_value=None)
     return service
 
 
@@ -112,8 +114,8 @@ class TestUpdateTraceStep:
         step_id = "1"
         request_data = {"step_evaluation": "like"}
 
-        # Mock the service method to succeed
-        mock_agent_service.update_trace_step.return_value = None
+        # Mock the service method to succeed (already set up as AsyncMock in fixture)
+        pass
 
         response = client.patch(
             f"/traces/{trace_id}/steps/{step_id}", json=request_data
@@ -136,8 +138,6 @@ class TestUpdateTraceStep:
         step_id = "2"
         request_data = {"step_evaluation": "dislike"}
 
-        mock_agent_service.update_trace_step.return_value = None
-
         response = client.patch(
             f"/traces/{trace_id}/steps/{step_id}", json=request_data
         )
@@ -153,8 +153,6 @@ class TestUpdateTraceStep:
         trace_id = "test-trace-789"
         step_id = "3"
         request_data = {"step_evaluation": "neutral"}
-
-        mock_agent_service.update_trace_step.return_value = None
 
         response = client.patch(
             f"/traces/{trace_id}/steps/{step_id}", json=request_data
@@ -186,8 +184,8 @@ class TestUpdateTraceStep:
         request_data = {"step_evaluation": "like"}
 
         # Mock the service to raise ValueError
-        mock_agent_service.update_trace_step.side_effect = ValueError(
-            "Invalid step_id format"
+        mock_agent_service.update_trace_step = AsyncMock(
+            side_effect=ValueError("Invalid step_id format")
         )
 
         response = client.patch(
@@ -204,8 +202,8 @@ class TestUpdateTraceStep:
         request_data = {"step_evaluation": "like"}
 
         # Mock the service to raise FileNotFoundError
-        mock_agent_service.update_trace_step.side_effect = FileNotFoundError(
-            "Trace not found"
+        mock_agent_service.update_trace_step = AsyncMock(
+            side_effect=FileNotFoundError("Trace not found")
         )
 
         response = client.patch(
@@ -222,8 +220,8 @@ class TestUpdateTraceStep:
         request_data = {"step_evaluation": "like"}
 
         # Mock the service to raise ValueError for step not found
-        mock_agent_service.update_trace_step.side_effect = ValueError(
-            "Step 999 not found in trace"
+        mock_agent_service.update_trace_step = AsyncMock(
+            side_effect=ValueError("Step 999 not found in trace")
         )
 
         response = client.patch(
@@ -251,8 +249,6 @@ class TestUpdateTraceStep:
         step_id = "1"
         request_data = {"step_evaluation": "like"}
 
-        mock_agent_service.update_trace_step.return_value = None
-
         response = client.patch(
             f"/traces/{trace_id}/steps/{step_id}", json=request_data
         )
@@ -268,8 +264,6 @@ class TestUpdateTraceStep:
         trace_id = "test-trace-123"
         step_id = "1"
         request_data = {"step_evaluation": "like"}
-
-        mock_agent_service.update_trace_step.return_value = None
 
         response = client.patch(
             f"/traces/{trace_id}/steps/{step_id}", json=request_data
@@ -294,8 +288,7 @@ class TestRoutesIntegration:
 
     def test_update_step_endpoint_available(self, client, mock_agent_service):
         """Test that update step endpoint is available"""
-        mock_agent_service.update_trace_step.return_value = None
-
+        # Mock is already set up as AsyncMock in fixture
         response = client.patch(
             "/traces/test/steps/1", json={"step_evaluation": "like"}
         )

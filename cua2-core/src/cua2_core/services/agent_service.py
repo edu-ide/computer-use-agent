@@ -104,9 +104,13 @@ class AgentService:
         """
         Update the archival service with current active task IDs.
         Should be called whenever tasks are added or removed.
+        Note: This should be called while holding self._lock to ensure consistent snapshot.
+        The archival service update itself is fast and non-blocking.
         """
         if self.archival_service.is_alive():
-            self.archival_service.update_active_tasks(set(self.active_tasks.keys()))
+            # Create a snapshot of active task IDs (should be called with lock held)
+            active_task_ids = set(self.active_tasks.keys())
+            self.archival_service.update_active_tasks(active_task_ids)
 
     async def create_id_and_sandbox(self, websocket: WebSocket) -> str:
         """Create a new ID and sandbox"""
@@ -174,8 +178,8 @@ class AgentService:
             self.active_tasks[trace_id] = active_task
             self.last_screenshot[trace_id] = None
 
-        # Update archival service with new active task
-        self._update_archival_active_tasks()
+            # Update archival service with new active task (while holding lock)
+            self._update_archival_active_tasks()
 
         asyncio.create_task(self._agent_processing(trace_id))
 
@@ -351,13 +355,13 @@ class AgentService:
 
             novnc_active = False
 
-            self.active_tasks[message_id].update_trace_metadata(
+            await self.active_tasks[message_id].update_trace_metadata(
                 final_state=final_state,
                 completed=True,
             )
 
             if message_id in self.active_tasks:
-                self.active_tasks[message_id].store_model()
+                await self.active_tasks[message_id].save_to_file()
 
             # Clean up
             async with self._lock:
@@ -370,8 +374,8 @@ class AgentService:
                 if message_id in self.last_screenshot:
                     del self.last_screenshot[message_id]
 
-            # Update archival service after task removal
-            self._update_archival_active_tasks()
+                # Update archival service after task removal (while holding lock)
+                self._update_archival_active_tasks()
 
             # Always release sandbox back to the pool, even if it's still in "creating" state
             # This handles cases where acquire_sandbox was called but sandbox never became ready
@@ -469,14 +473,23 @@ class AgentService:
                         step_evaluation="neutral",
                     )
 
-                    self.active_tasks[message_id].update_trace_metadata(
-                        step_input_tokens_used=memory_step.token_usage.input_tokens,
-                        step_output_tokens_used=memory_step.token_usage.output_tokens,
-                        step_duration=memory_step.timing.duration,
-                        step_numberOfSteps=1,
+                    # Schedule async operations in the event loop (callback runs in worker thread)
+                    future1 = asyncio.run_coroutine_threadsafe(
+                        self.active_tasks[message_id].update_trace_metadata(
+                            step_input_tokens_used=memory_step.token_usage.input_tokens,
+                            step_output_tokens_used=memory_step.token_usage.output_tokens,
+                            step_duration=memory_step.timing.duration,
+                            step_numberOfSteps=1,
+                        ),
+                        loop,
                     )
-
-                    self.active_tasks[message_id].update_step(step)
+                    future2 = asyncio.run_coroutine_threadsafe(
+                        self.active_tasks[message_id].update_step(step),
+                        loop,
+                    )
+                    # Wait for both to complete
+                    future1.result()
+                    future2.result()
 
                     websocket = self.task_websockets.get(message_id)
                     if websocket and websocket.client_state == WebSocketState.CONNECTED:
@@ -529,7 +542,7 @@ class AgentService:
             # Re-raise to ensure error is logged
             raise
 
-    def update_trace_step(
+    async def update_trace_step(
         self,
         trace_id: str,
         step_id: str,
@@ -559,7 +572,8 @@ class AgentService:
                 step_index = int(step_id) - 1
                 if 0 <= step_index < len(active_task.steps):
                     active_task.steps[step_index].step_evaluation = step_evaluation
-                    active_task.update_step(active_task.steps[step_index])
+                    await active_task.update_step(active_task.steps[step_index])
+                    return active_task.steps[step_index]
                 else:
                     raise ValueError(f"Step {step_id} not found in trace")
             except (ValueError, TypeError) as e:
@@ -602,7 +616,7 @@ class AgentService:
             except (ValueError, KeyError, TypeError) as e:
                 raise ValueError(f"Error processing step update: {e}")
 
-    def update_trace_evaluation(
+    async def update_trace_evaluation(
         self,
         trace_id: str,
         user_evaluation: Literal["success", "failed", "not_evaluated"],
@@ -622,7 +636,7 @@ class AgentService:
 
         if active_task:
             # Task is still active
-            active_task.update_trace_metadata(user_evaluation=user_evaluation)
+            await active_task.update_trace_metadata(user_evaluation=user_evaluation)
         else:
             # Task is not active, try to load from file
             data_dir = "data"
@@ -657,7 +671,7 @@ class AgentService:
     async def stop_task(self, trace_id: str):
         """Stop a task"""
         if trace_id in self.active_tasks:
-            self.active_tasks[trace_id].update_trace_metadata(
+            await self.active_tasks[trace_id].update_trace_metadata(
                 completed=True,
             )
 
@@ -687,7 +701,7 @@ class AgentService:
             try:
                 # Mark task as completed to stop the agent (if task exists)
                 if message_id in self.active_tasks:
-                    self.active_tasks[message_id].update_trace_metadata(
+                    await self.active_tasks[message_id].update_trace_metadata(
                         completed=True,
                     )
                     logger.info(
