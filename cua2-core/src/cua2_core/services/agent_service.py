@@ -55,6 +55,9 @@ class AgentService:
         self._lock = asyncio.Lock()
         self.max_sandboxes = max_sandboxes
         self._archival_lock_file: IO[str] | None = None
+        self._start_time = (
+            time.time()
+        )  # Track app start time to prevent sandbox creation in first 30s
 
         # Initialize archival service in dedicated process
         self.archival_service = ArchivalService(
@@ -114,6 +117,22 @@ class AgentService:
 
     async def create_id_and_sandbox(self, websocket: WebSocket) -> str:
         """Create a new ID and sandbox"""
+        # Prevent sandbox creation for the first 30 seconds after app start
+        # This prevents spawning sandboxes for all users already connected when app restarts
+        elapsed_time = time.time() - self._start_time
+        if elapsed_time < 30:
+            logger.info(
+                f"Skipping sandbox creation (app started {elapsed_time:.1f}s ago, "
+                f"waiting for 30s grace period)"
+            )
+            # Still create UUID and register websocket, but don't acquire sandbox
+            async with self._lock:
+                uuid = str(uuid4())
+                while uuid in self.active_tasks:
+                    uuid = str(uuid4())
+                self.task_websockets[uuid] = websocket
+            return uuid
+
         async with self._lock:
             uuid = str(uuid4())
             while uuid in self.active_tasks:
