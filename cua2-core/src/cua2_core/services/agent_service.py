@@ -31,6 +31,10 @@ from starlette.websockets import WebSocketState
 
 logger = logging.getLogger(__name__)
 
+# Timeout constants to prevent stuck threads
+AGENT_RUN_TIMEOUT = 1000  # 10 minutes - maximum time for agent.run() to complete
+SANDBOX_KILL_TIMEOUT = 30  # 30 seconds - maximum time for sandbox.kill() to complete
+
 
 class AgentStopException(Exception):
     """Exception for agent stop"""
@@ -119,26 +123,27 @@ class AgentService:
         """Create a new ID and sandbox"""
         # Prevent sandbox creation for the first 30 seconds after app start
         # This prevents spawning sandboxes for all users already connected when app restarts
-        elapsed_time = time.time() - self._start_time
-        if elapsed_time < 30:
-            logger.info(
-                f"Skipping sandbox creation (app started {elapsed_time:.1f}s ago, "
-                f"waiting for 30s grace period)"
-            )
-            # Still create UUID and register websocket, but don't acquire sandbox
-            async with self._lock:
-                uuid = str(uuid4())
-                while uuid in self.active_tasks:
-                    uuid = str(uuid4())
-                self.task_websockets[uuid] = websocket
-            return uuid
+        # elapsed_time = time.time() - self._start_time
+        # if elapsed_time < 30:
+        #     logger.info(
+        #         f"Skipping sandbox creation (app started {elapsed_time:.1f}s ago, "
+        #         f"waiting for 30s grace period)"
+        #     )
+        #     # Still create UUID and register websocket, but don't acquire sandbox
+        #     async with self._lock:
+        #         uuid = str(uuid4())
+        #         while uuid in self.active_tasks:
+        #             uuid = str(uuid4())
+        #         self.task_websockets[uuid] = websocket
+        #     return uuid
 
         async with self._lock:
             uuid = str(uuid4())
             while uuid in self.active_tasks:
                 uuid = str(uuid4())
             self.task_websockets[uuid] = websocket
-        await self.sandbox_service.acquire_sandbox(uuid)
+        logger.info(f"Created UUID {uuid} and registered websocket")
+        # await self.sandbox_service.acquire_sandbox(uuid)
         return uuid
 
     async def process_user_task(
@@ -150,32 +155,32 @@ class AgentService:
         trace.steps = []
         trace.traceMetadata = AgentTraceMetadata(traceId=trace_id)
 
-        trace_id_to_release = None
+        # trace_id_to_release = None
         async with self._lock:
             if self.task_websockets[trace_id] != websocket:
                 # Release sandbox before raising exception to prevent leak
                 # Do this outside the lock to avoid deadlock
-                trace_id_to_release = trace_id
+                # trace_id_to_release = trace_id
                 # Remove from task_websockets since we're rejecting this
                 if trace_id in self.task_websockets:
                     del self.task_websockets[trace_id]
 
-        # Release sandbox outside of lock if there was a mismatch
-        if trace_id_to_release:
-            try:
-                await self.sandbox_service.release_sandbox(trace_id_to_release)
-                logger.info(
-                    f"Released sandbox for {trace_id_to_release} due to WebSocket mismatch"
-                )
-            except Exception as e:
-                logger.error(
-                    f"Error releasing sandbox for {trace_id_to_release}: {e}",
-                    exc_info=True,
-                )
-            raise WebSocketException("WebSocket mismatch")
+            # # Release sandbox outside of lock if there was a mismatch
+            # if trace_id_to_release:
+            #     try:
+            #         await self.sandbox_service.release_sandbox(trace_id_to_release)
+            #         logger.info(
+            #             f"Released sandbox for {trace_id_to_release} due to WebSocket mismatch"
+            #         )
+            #     except Exception as e:
+            #         logger.error(
+            #             f"Error releasing sandbox for {trace_id_to_release}: {e}",
+            #             exc_info=True,
+            #         )
+            #     raise WebSocketException("WebSocket mismatch")
 
-        # Continue with normal processing if no mismatch
-        async with self._lock:
+            # # Continue with normal processing if no mismatch
+            # async with self._lock:
             active_task = ActiveTask(
                 message_id=trace_id,
                 instruction=trace.instruction,
@@ -320,10 +325,18 @@ class AgentService:
             image = Image.open(BytesIO(screenshot_bytes))
             self.last_screenshot[message_id] = (image, step_filename)
 
-            await asyncio.to_thread(
-                agent.run,
-                user_content,
-            )
+            try:
+                await asyncio.wait_for(
+                    asyncio.to_thread(agent.run, user_content),
+                    timeout=AGENT_RUN_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                logger.error(
+                    f"Agent run timed out after {AGENT_RUN_TIMEOUT} seconds for {message_id}"
+                )
+                raise Exception(
+                    f"Agent run timed out after {AGENT_RUN_TIMEOUT} seconds"
+                )
 
             self.active_tasks[message_id].traceMetadata.completed = True
 

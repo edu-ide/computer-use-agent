@@ -9,6 +9,10 @@ from pydantic import BaseModel
 
 SANDBOX_TIMEOUT = 500
 SANDBOX_READY_TIMEOUT = 200  # Seconds before a sandbox expires
+SANDBOX_CREATION_THREAD_TIMEOUT = (
+    300  # Timeout for sandbox creation thread to prevent hanging
+)
+SANDBOX_KILL_TIMEOUT = 30  # Timeout for sandbox.kill() to prevent hanging
 WIDTH = 1280
 HEIGHT = 960
 
@@ -140,7 +144,10 @@ class SandboxService:
         """Background task to create a sandbox"""
         desktop = None
         try:
-            desktop = await asyncio.to_thread(self._create_and_setup_sandbox)
+            desktop = await asyncio.wait_for(
+                asyncio.to_thread(self._create_and_setup_sandbox),
+                timeout=SANDBOX_CREATION_THREAD_TIMEOUT,
+            )
             print(
                 f"Sandbox created for session {session_hash}, ID: {desktop.sandbox_id}"
             )
@@ -174,6 +181,16 @@ class SandboxService:
                 self.sandboxes[session_hash] = SandboxEntry(desktop)
                 print(f"Sandbox {session_hash} is now ready")
 
+        except asyncio.TimeoutError:
+            error_msg = f"Sandbox creation timed out after {SANDBOX_CREATION_THREAD_TIMEOUT} seconds"
+            print(f"Error creating sandbox for session {session_hash}: {error_msg}")
+
+            async with self.lock:
+                self.pending.discard(session_hash)
+                # Store error so agent service can retrieve it
+                self.creation_errors[session_hash] = error_msg
+            if desktop:
+                asyncio.create_task(self._kill_sandbox_safe(desktop, session_hash))
         except Exception as e:
             error_msg = str(e)
             import traceback
@@ -208,7 +225,14 @@ class SandboxService:
     async def _kill_sandbox_safe(self, sandbox: Sandbox, session_hash: str):
         """Safely kill a sandbox with error handling"""
         try:
-            await asyncio.to_thread(sandbox.kill)
+            await asyncio.wait_for(
+                asyncio.to_thread(sandbox.kill),
+                timeout=SANDBOX_KILL_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            print(
+                f"Sandbox kill timed out after {SANDBOX_KILL_TIMEOUT} seconds for session {session_hash}"
+            )
         except Exception as e:
             print(f"Error killing sandbox for session {session_hash}: {str(e)}")
 
