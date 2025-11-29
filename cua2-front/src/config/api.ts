@@ -1,8 +1,11 @@
+/**
+ * API 및 WebSocket URL 설정
+ * - 환경변수가 설정되어 있으면 사용
+ * - 그렇지 않으면 현재 호스트 기반으로 동적 생성
+ */
 
 /**
  * Get the WebSocket URL based on the environment
- * In production (Docker), it uses the current host
- * In development, it uses the configured URL or defaults to localhost:8000
  */
 export const getWebSocketUrl = (): string => {
     // Check if we have a configured WebSocket URL from environment
@@ -12,21 +15,22 @@ export const getWebSocketUrl = (): string => {
         return envWsUrl;
     }
 
-    // In production (when served from same origin), use relative WebSocket URL
+    // Use current host (works for both local and remote access)
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const host = window.location.hostname;
+    const port = import.meta.env.VITE_API_PORT || '8000';
+
+    // In production, use same port as frontend (assume reverse proxy)
     if (import.meta.env.PROD) {
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const host = window.location.host;
-        return `${protocol}//${host}/ws`;
+        return `${protocol}//${window.location.host}/ws`;
     }
 
-    // Development fallback
-    return 'ws://localhost:8000/ws';
+    // In development, use API port
+    return `${protocol}//${host}:${port}/ws`;
 };
 
 /**
  * Get the base API URL based on the environment
- * In production (Docker), it uses the current host with /api prefix
- * In development, it uses the configured URL or defaults to localhost:8000/api
  */
 export const getApiBaseUrl = (): string => {
     // Check if we have a configured API URL from environment
@@ -36,13 +40,16 @@ export const getApiBaseUrl = (): string => {
         return envApiUrl;
     }
 
-    // In production (when served from same origin), use relative API URL
+    // Use current host (works for both local and remote access)
+    const protocol = window.location.protocol;
+    const host = window.location.hostname;
+    const port = import.meta.env.VITE_API_PORT || '8000';
+
+    // In production, use same port as frontend (assume reverse proxy)
     if (import.meta.env.PROD) {
-        const protocol = window.location.protocol;
-        const host = window.location.host;
-        return `${protocol}//${host}/api`;
+        return `${protocol}//${window.location.host}/api`;
     }
 
-    // Development fallback
-    return 'http://localhost:8000/api';
+    // In development, use API port
+    return `${protocol}//${host}:${port}/api`;
 };

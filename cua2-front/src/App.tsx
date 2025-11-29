@@ -5,6 +5,9 @@ import { getWebSocketUrl } from './config/api';
 import { useAgentWebSocket } from './hooks/useAgentWebSocket';
 import Task from "./pages/Task";
 import Welcome from "./pages/Welcome";
+import Products from "./pages/Products";
+import WorkflowList from "./pages/WorkflowList";
+import WorkflowDetail from "./pages/WorkflowDetail";
 import { selectIsDarkMode, useAgentStore } from './stores/agentStore';
 import getTheme from './theme';
 
@@ -26,6 +29,9 @@ const App = () => {
         <Routes>
           <Route path="/" element={<Welcome />} />
           <Route path="/task" element={<Task />} />
+          <Route path="/products" element={<Products />} />
+          <Route path="/workflows" element={<WorkflowList />} />
+          <Route path="/workflows/:workflowId" element={<WorkflowDetail />} />
         </Routes>
       </BrowserRouter>
     </ThemeProvider>

@@ -313,8 +313,39 @@ export const SandboxViewer: React.FC<SandboxViewerProps> = ({
             title="OS Stream"
             lang="en"
           />
+        ) : isAgentProcessing && steps && steps.length > 0 ? (
+          // Local mode: Show latest step screenshot (no VNC)
+          <Box
+            sx={{
+              width: '100%',
+              height: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              overflow: 'auto',
+              backgroundColor: 'black',
+              position: 'relative',
+            }}
+          >
+            {steps[steps.length - 1].image ? (
+              <img
+                src={steps[steps.length - 1].image}
+                alt="Latest screenshot"
+                style={{
+                  maxWidth: '100%',
+                  maxHeight: '100%',
+                  objectFit: 'contain',
+                }}
+              />
+            ) : (
+              <Box sx={{ textAlign: 'center', color: 'text.secondary' }}>
+                <CircularProgress size={48} sx={{ mb: 2, color: 'primary.main' }} />
+                <Typography variant="body2">Processing step {steps.length}...</Typography>
+              </Box>
+            )}
+          </Box>
         ) : isAgentProcessing ? (
-          // Loading state
+          // Loading state (no steps yet)
           <Box
             sx={{
               textAlign: 'center',
@@ -336,10 +367,10 @@ export const SandboxViewer: React.FC<SandboxViewerProps> = ({
               }}
             />
             <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5, fontSize: '0.875rem', color: 'text.primary' }}>
-              Connecting to E2B...
+              Starting Local Sandbox...
             </Typography>
             <Typography variant="caption" sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>
-              Setting up sandbox environment
+              Setting up Xvfb virtual display
             </Typography>
           </Box>
         ) : (

@@ -3,7 +3,6 @@ import json
 # Get services from app state
 from cua2_core.app import app
 from cua2_core.models.models import AgentTrace, HeartbeatEvent
-from cua2_core.services.agent_service import AgentService
 from cua2_core.websocket.websocket_manager import WebSocketManager
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -16,7 +15,7 @@ async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for real-time communication"""
 
     websocket_manager: WebSocketManager = app.state.websocket_manager
-    agent_service: AgentService = app.state.agent_service
+    agent_service = app.state.agent_service
 
     await websocket_manager.connect(websocket)
 

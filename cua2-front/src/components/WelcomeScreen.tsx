@@ -5,8 +5,11 @@ import LightModeOutlined from '@mui/icons-material/LightModeOutlined';
 import SendIcon from '@mui/icons-material/Send';
 import ShuffleIcon from '@mui/icons-material/Shuffle';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
+import InventoryIcon from '@mui/icons-material/Inventory';
+import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import { Box, Button, CircularProgress, Container, FormControl, IconButton, InputLabel, MenuItem, Paper, Select, TextField, Typography } from '@mui/material';
 import React, { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 interface WelcomeScreenProps {
   onStartTask: (instruction: string, modelId: string) => void;
@@ -14,6 +17,7 @@ interface WelcomeScreenProps {
 }
 
 export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStartTask, isConnected }) => {
+  const navigate = useNavigate();
   const [customTask, setCustomTask] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [isGeneratingQuestion, setIsGeneratingQuestion] = useState(false);
@@ -106,8 +110,44 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStartTask, isCon
 
   return (
     <>
-      {/* Dark Mode Toggle - Top Right (Absolute to viewport) */}
-      <Box sx={{ position: 'absolute', top: 24, right: 24, zIndex: 1000 }}>
+      {/* Top Right Controls - Workflows + Products + Dark Mode Toggle */}
+      <Box sx={{ position: 'absolute', top: 24, right: 24, zIndex: 1000, display: 'flex', gap: 1 }}>
+        <Button
+          onClick={() => navigate('/workflows')}
+          variant="contained"
+          size="small"
+          startIcon={<AccountTreeIcon />}
+          sx={{
+            textTransform: 'none',
+            fontWeight: 600,
+            background: 'linear-gradient(135deg, #4F86C6 0%, #2B5C94 100%)',
+            '&:hover': {
+              background: 'linear-gradient(135deg, #3d6fa3 0%, #1e4a7a 100%)',
+            },
+          }}
+        >
+          워크플로우
+        </Button>
+        <Button
+          onClick={() => navigate('/products')}
+          variant="outlined"
+          size="small"
+          startIcon={<InventoryIcon />}
+          sx={{
+            color: 'text.primary',
+            backgroundColor: 'background.paper',
+            border: '1px solid',
+            borderColor: 'divider',
+            textTransform: 'none',
+            fontWeight: 600,
+            '&:hover': {
+              backgroundColor: 'action.hover',
+              borderColor: 'primary.main',
+            },
+          }}
+        >
+          상품 목록
+        </Button>
         <IconButton
           onClick={toggleDarkMode}
           size="medium"

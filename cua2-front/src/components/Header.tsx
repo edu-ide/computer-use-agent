@@ -138,7 +138,7 @@ export const Header: React.FC<HeaderProps> = ({ isAgentProcessing, onBackToHome 
       }
     }
     // Otherwise check running states
-    if (isConnectingToE2B) return { label: 'Connecting to E2B...', color: 'primary', icon: <CircularProgress size={16} thickness={5} sx={{ color: 'primary.main' }} /> };
+    if (isConnectingToE2B) return { label: 'Starting Sandbox...', color: 'primary', icon: <CircularProgress size={16} thickness={5} sx={{ color: 'primary.main' }} /> };
     if (isAgentProcessing || trace?.isRunning) return { label: 'Running', color: 'primary', icon: <CircularProgress size={16} thickness={5} sx={{ color: 'primary.main' }} /> };
     return { label: 'Ready', color: 'default', icon: <CheckIcon sx={{ fontSize: 16, color: 'text.secondary' }} /> };
   };

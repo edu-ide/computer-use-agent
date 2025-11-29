@@ -91,7 +91,7 @@ export const ConnectionStepCard: React.FC<ConnectionStepCardProps> = ({ isConnec
                 lineHeight: 1.3,
               }}
             >
-              {isConnecting ? 'Connecting to E2B...' : 'Connected to E2B'}
+              {isConnecting ? 'Starting Local Sandbox...' : 'Local Sandbox Ready'}
             </Typography>
             <Typography
               sx={{
@@ -100,7 +100,7 @@ export const ConnectionStepCard: React.FC<ConnectionStepCardProps> = ({ isConnec
                 lineHeight: 1.2,
               }}
             >
-              {isConnecting ? 'Setting up sandbox environment' : 'Sandbox ready'}
+              {isConnecting ? 'Setting up Xvfb virtual display' : 'Xvfb display ready'}
             </Typography>
           </Box>
         </Box>

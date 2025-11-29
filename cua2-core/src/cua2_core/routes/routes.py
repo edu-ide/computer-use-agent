@@ -10,7 +10,7 @@ from cua2_core.models.models import (
     UpdateTraceEvaluationRequest,
     UpdateTraceEvaluationResponse,
 )
-from cua2_core.services.agent_service import AgentService
+# AgentService는 app.state에서 가져옴 (로컬/클라우드 모드에 따라 다름)
 from cua2_core.services.agent_utils.get_model import AVAILABLE_MODELS
 from cua2_core.services.instruction_service import InstructionService
 from cua2_core.websocket.websocket_manager import WebSocketManager
@@ -25,7 +25,7 @@ def get_websocket_manager(request: Request) -> WebSocketManager:
     return request.app.state.websocket_manager
 
 
-def get_agent_service(request: Request) -> AgentService:
+def get_agent_service(request: Request):
     """Dependency to get agent service from app state"""
     return request.app.state.agent_service
 
@@ -70,7 +70,7 @@ async def update_trace_step(
     trace_id: str,
     step_id: str,
     request: UpdateStepRequest,
-    agent_service: AgentService = Depends(get_agent_service),
+    agent_service = Depends(get_agent_service),
 ):
     """Update a specific step in a trace (e.g., update step evaluation)"""
     try:
@@ -95,7 +95,7 @@ async def update_trace_step(
 async def update_trace_evaluation(
     trace_id: str,
     request: UpdateTraceEvaluationRequest,
-    agent_service: AgentService = Depends(get_agent_service),
+    agent_service = Depends(get_agent_service),
 ):
     """Update the user evaluation for a trace (overall task feedback)"""
     try:
