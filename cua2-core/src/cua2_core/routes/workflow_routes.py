@@ -17,6 +17,9 @@ router = APIRouter(prefix="/api/workflows", tags=["workflows"])
 # 전역 VLM 에이전트 실행기 관리
 _active_agent_runners: Dict[str, VLMAgentRunner] = {}
 
+# 완료된 워크플로우의 추론 로그 저장 (에이전트 정리 후에도 조회 가능)
+_completed_reasoning_logs: Dict[str, Any] = {}
+
 
 class StartWorkflowRequest(BaseModel):
     """워크플로우 시작 요청"""
@@ -141,9 +144,15 @@ async def stop_workflow(execution_id: str):
     if not registry.stop_workflow(execution_id):
         raise HTTPException(status_code=404, detail=f"실행 중인 워크플로우를 찾을 수 없음: {execution_id}")
 
-    # 에이전트 정리
+    # 에이전트 정리 전 추론 로그 저장
     if execution_id in _active_agent_runners:
-        await _active_agent_runners[execution_id].cleanup()
+        runner = _active_agent_runners[execution_id]
+        _completed_reasoning_logs[execution_id] = {
+            "logs": runner.get_reasoning_logs(),
+            "model_id": runner.model_id,
+            "node_id": runner._node_id,
+        }
+        await runner.cleanup()
         del _active_agent_runners[execution_id]
 
     return {
@@ -273,6 +282,101 @@ async def get_current_screenshot(execution_id: str):
     }
 
 
+@router.get("/executions/{execution_id}/reasoning-logs")
+async def get_reasoning_logs(execution_id: str, format: str = Query("json", enum=["json", "text"])):
+    """
+    VLM 추론 로그 조회
+
+    모델의 전체 추론 과정을 다운로드합니다.
+    비효율적인 추론 패턴 분석에 유용합니다.
+
+    Args:
+        format: "json" (구조화된 데이터) 또는 "text" (텍스트 형식)
+    """
+    reasoning_logs = None
+    model_id = "unknown"
+    node_id = "unknown"
+
+    # 1. 활성 에이전트에서 먼저 조회
+    if execution_id in _active_agent_runners:
+        runner = _active_agent_runners[execution_id]
+        reasoning_logs = runner.get_reasoning_logs()
+        model_id = runner.model_id
+        node_id = runner._node_id or "unknown"
+    # 2. 완료된 로그에서 조회
+    elif execution_id in _completed_reasoning_logs:
+        cached = _completed_reasoning_logs[execution_id]
+        reasoning_logs = cached.get("logs", [])
+        model_id = cached.get("model_id", "unknown")
+        node_id = cached.get("node_id", "unknown")
+    else:
+        raise HTTPException(status_code=404, detail=f"추론 로그를 찾을 수 없음: {execution_id}")
+
+    if format == "text":
+        from fastapi.responses import PlainTextResponse
+        # 텍스트 형식으로 변환
+        lines = []
+        lines.append("=" * 80)
+        lines.append(f"VLM 추론 로그 - {node_id}")
+        lines.append(f"모델: {model_id}")
+        lines.append(f"총 스텝: {len(reasoning_logs)}")
+        lines.append("=" * 80)
+        lines.append("")
+
+        for log in reasoning_logs:
+            lines.append(f"--- Step {log.get('step_number', '?')} ({log.get('timestamp', '')}) ---")
+            lines.append(f"Duration: {log.get('duration_ms', 'N/A')}ms")
+            lines.append("")
+
+            if log.get("model_raw_output"):
+                lines.append("[Model Raw Output]")
+                lines.append(log["model_raw_output"])
+                lines.append("")
+
+            if log.get("thought"):
+                lines.append("[Thought]")
+                lines.append(log["thought"])
+                lines.append("")
+
+            if log.get("action"):
+                lines.append("[Action]")
+                lines.append(log["action"])
+                lines.append("")
+
+            if log.get("observation"):
+                lines.append("[Observation]")
+                lines.append(str(log["observation"]))
+                lines.append("")
+
+            if log.get("error"):
+                lines.append("[Error]")
+                lines.append(log["error"])
+                lines.append("")
+
+            if log.get("orchestrator_feedback"):
+                lines.append("[Orchestrator Feedback]")
+                lines.append(str(log["orchestrator_feedback"]))
+                lines.append("")
+
+            lines.append("")
+
+        return PlainTextResponse(
+            content="\n".join(lines),
+            media_type="text/plain",
+            headers={
+                "Content-Disposition": f"attachment; filename=reasoning_logs_{execution_id}.txt"
+            }
+        )
+    else:
+        return {
+            "execution_id": execution_id,
+            "reasoning_logs": reasoning_logs,
+            "total_steps": len(reasoning_logs),
+            "model_id": model_id,
+            "node_id": node_id,
+        }
+
+
 @router.get("/executions/{execution_id}/report")
 async def get_execution_report(execution_id: str):
     """
@@ -317,11 +421,30 @@ async def get_execution_report(execution_id: str):
     }
 
 
+def save_reasoning_logs_before_cleanup(execution_id: str):
+    """
+    에이전트 정리 전 추론 로그 저장 (워크플로우 완료 시 호출)
+
+    워크플로우가 완료되면 에이전트가 정리되기 전에 이 함수를 호출하여
+    추론 로그를 저장합니다.
+    """
+    if execution_id in _active_agent_runners:
+        runner = _active_agent_runners[execution_id]
+        _completed_reasoning_logs[execution_id] = {
+            "logs": runner.get_reasoning_logs(),
+            "model_id": runner.model_id,
+            "node_id": runner._node_id,
+        }
+        print(f"추론 로그 저장됨: {execution_id} ({len(runner.get_reasoning_logs())} 스텝)")
+
+
 # 앱 종료 시 정리 함수
 async def cleanup_all_agents():
     """모든 활성 에이전트 정리"""
     for execution_id, runner in list(_active_agent_runners.items()):
         try:
+            # 정리 전 추론 로그 저장
+            save_reasoning_logs_before_cleanup(execution_id)
             await runner.cleanup()
         except Exception as e:
             print(f"에이전트 정리 오류 ({execution_id}): {e}")

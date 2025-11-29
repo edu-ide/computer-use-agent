@@ -8,6 +8,7 @@ Letta 메모리 통합:
 """
 
 import asyncio
+import logging
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
@@ -18,7 +19,9 @@ from .workflow_base import (
     WorkflowState,
     NodeResult,
     NodeStatus,
+    VLMErrorType,
 )
+from .common_subgraphs import CommonSubgraphs
 from ..services.coupang_db_service import get_coupang_db
 from ..services.letta_memory_service import (
     get_letta_memory_service,
@@ -35,9 +38,9 @@ from ..services.orchestrator_service import (
     OrchestratorService,
     ExecutionStrategy,
     ExecutionDecision,
-    ErrorAction,
     WorkflowReport,
 )
+# Note: ErrorAction은 더 이상 사용하지 않음 (LangGraph 에러 핸들링으로 대체)
 from ..services.agent_activity_log import (
     log_vlm,
     log_memory,
@@ -45,6 +48,13 @@ from ..services.agent_activity_log import (
 )
 from ..services.vlm_agent_runner import VLMStepLog
 from ..models.coupang_models import CoupangProduct
+from .standard_nodes import (
+    create_navigation_node,
+    create_search_node,
+    create_analysis_node,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class CoupangCollectWorkflow(WorkflowBase):
@@ -298,116 +308,73 @@ class CoupangCollectWorkflow(WorkflowBase):
 
     @property
     def nodes(self) -> List[WorkflowNode]:
-        return [
-            WorkflowNode(
-                name="open_coupang",
-                display_name="쿠팡 열기",
-                description="쿠팡 웹사이트 열기",
-                on_success="search_keyword",
-                on_failure="error_handler",
-                node_type="vlm",
-                timeout_sec=60,  # 1분
-                avg_duration_sec=15,  # 평균 15초
-                instruction="""Open Chrome browser and navigate to https://www.coupang.com
+        # 모델 ID 가져오기
+        model_id = "local-qwen3-vl"
+        if self._agent_runner and hasattr(self._agent_runner, "model_id"):
+            model_id = self._agent_runner.model_id
 
-Steps:
-1. Use open_url("https://www.coupang.com") to navigate to Coupang
-2. Wait for the page to fully load
-3. Confirm you see the Coupang homepage""",
-            ),
-            WorkflowNode(
+        return [
+            create_search_node(
                 name="search_keyword",
+                keyword_param="keyword",
                 display_name="키워드 검색",
-                description="키워드로 상품 검색",
+                description="쿠팡 접속 및 키워드 검색",
                 on_success="analyze_page",
                 on_failure="error_handler",
-                node_type="vlm",
-                timeout_sec=60,  # 1분
-                avg_duration_sec=20,  # 평균 20초
-                instruction="""Search for "{keyword}" on Coupang:
-
-Steps:
-1. Find the search input box at the top of the page
-2. Click on the search box
-3. Type the keyword using write()
-4. Press Enter to search using press(["enter"])
-5. Wait for search results to load using wait(3)
-6. Confirm search results are displayed""",
+                agent_type="VLMAgent",
+                model_id=model_id,
+                timeout_sec=90,
+                avg_duration_sec=35,
             ),
-            WorkflowNode(
+            create_analysis_node(
                 name="analyze_page",
+                goal="Analyze the current page, extract non-rocket delivery products, and navigate to the next page.",
+                extraction_details="""Target products that DO NOT have "Rocket Delivery" (로켓배송), "Rocket Jikgu" (로켓직구), or "Rocket Wow" (로켓와우) badges.
+   - Extract: Name, Price, URL, Seller Name.""",
+                pagination_details="""- Check if a "Next Page" button exists and is active.
+   - If found, click it to navigate to the next page.
+   - If clicking next page fails, try scrolling down first.""",
+                output_details="""-"products": [list of extracted products]
+     - "next_page_clicked": true/false""",
                 display_name="페이지 분석",
-                description="페이지 분석 및 비로켓 상품 수집",
+                description="페이지 분석, 상품 수집 및 다음 페이지 이동",
                 on_success="save_products",
                 on_failure="error_handler",
-                node_type="vlm",
-                timeout_sec=180,  # 3분 (스크롤 + 분석)
-                avg_duration_sec=90,  # 평균 1분 30초
-                instruction="""Analyze the current Coupang search results page:
-
-Look at the product listings and identify products that do NOT have:
-- 로켓배송 badge (blue rocket icon)
-- 로켓직구 badge
-- 로켓와우 badge
-
-These are "일반배송" (regular delivery) products.
-
-Steps:
-1. Scroll down slowly to see all products using scroll(500, 500, "down", 2)
-2. Look for products without rocket badges
-3. For each non-rocket product, extract:
-   - Product name (상품명)
-   - Price (가격)
-   - Product URL or ID if visible
-   - Seller name if visible (판매자)
-4. Continue scrolling to see more products
-5. Return a list of found products in JSON format""",
+                agent_type="CodeAgent",  # Code Agent 사용
+                model_id="Orchestrator-8B",  # Orchestrator-8B 모델
+                node_type="extract_data",  # Code Agent가 처리
+                clickable=True,  # 클릭하여 상세 보기 가능
+                timeout_sec=240,
+                avg_duration_sec=120,
             ),
             WorkflowNode(
                 name="save_products",
                 display_name="상품 저장",
                 description="수집한 상품을 DB에 저장",
-                on_success="check_next_page",
+                on_success="analyze_page",  # Default loop back
                 on_failure="error_handler",
                 node_type="process",
                 timeout_sec=30,  # 30초
                 avg_duration_sec=2,  # 평균 2초 (빠른 DB 작업)
+                clickable=True,  # 상세 보기 가능
             ),
-            WorkflowNode(
-                name="check_next_page",
-                display_name="다음 페이지",
-                description="다음 페이지 확인",
-                on_success="analyze_page",  # 다음 페이지 있으면 다시 분석
-                on_failure="find_related",   # 없으면 연관 키워드로
-                node_type="vlm",
-                timeout_sec=60,  # 1분
-                avg_duration_sec=25,  # 평균 25초
-                instruction="""Check if there is a next page and navigate to it:
-
-Steps:
-1. Scroll to the bottom of the page to find pagination
-2. Look for pagination controls (page numbers or "다음" button)
-3. If next page exists, click on the next page number or "다음" button
-4. Wait for the new page to load using wait(3)
-5. If no next page available, report "no_next_page" """,
-            ),
-            WorkflowNode(
+            create_analysis_node(
                 name="find_related",
+                goal="Find and click a related search keyword to expand the search.",
+                extraction_details="""Locate the "Related Keywords" (연관 검색어) section or suggested keywords.
+   - Identify a keyword that hasn't been searched yet.""",
+                pagination_details="""- Click on the new keyword.
+   - Verify that a new search results page is loaded.
+   - If clicking fails, try scrolling to bring the element into view.""",
+                output_details="""- Return "no_related_found" if no related keywords are found.""",
                 display_name="연관 키워드",
                 description="연관 키워드 탐색",
                 on_success="search_keyword",  # 연관 키워드로 다시 검색
                 on_failure="complete",  # 없으면 완료
-                node_type="vlm",
-                timeout_sec=60,  # 1분
-                avg_duration_sec=30,  # 평균 30초
-                instruction="""Find related search keywords on Coupang:
-
-Steps:
-1. Look for "연관 검색어" or "관련 검색어" section on the page
-2. Or look for suggested keywords at the top or bottom of results
-3. Find a new keyword that is not already searched
-4. If you find a good related keyword, click on it
-5. If no new related keywords exist, report "no_related_found" """,
+                agent_type="VLMAgent",
+                model_id=model_id,
+                timeout_sec=60,
+                avg_duration_sec=30,
             ),
             WorkflowNode(
                 name="complete",
@@ -429,7 +396,7 @@ Steps:
 
     @property
     def start_node(self) -> str:
-        return "open_coupang"
+        return "search_keyword"
 
     async def execute_node(self, node_name: str, state: WorkflowState) -> NodeResult:
         """노드별 실행 로직 (Letta 메모리 통합)"""
@@ -443,11 +410,9 @@ Steps:
         await self._update_memory_on_node_start(node_name, state)
 
         handlers = {
-            "open_coupang": self._open_coupang,
             "search_keyword": self._search_keyword,
             "analyze_page": self._analyze_page,
             "save_products": self._save_products,
-            "check_next_page": self._check_next_page,
             "find_related": self._find_related,
             "complete": self._complete,
             "error_handler": self._error_handler,
@@ -500,6 +465,7 @@ Steps:
             "step_number": step_log.step_number,
             "timestamp": step_log.timestamp,
             "screenshot": step_log.screenshot,
+            "screenshot_after": getattr(step_log, "screenshot_after", None),
             "thought": step_log.thought,
             "action": step_log.action,
             "observation": step_log.observation,
@@ -539,7 +505,7 @@ Steps:
         instruction: str,
         state: WorkflowState,
         node_name: str,
-    ) -> tuple[bool, Dict[str, Any], Optional[str]]:
+    ) -> tuple[bool, Dict[str, Any], Optional[str], VLMErrorType]:
         """
         VLM 명령 실행 (Orchestrator 패턴)
 
@@ -597,7 +563,7 @@ Steps:
                 print(f"[Orchestrator] {node_name}: ⚡ CACHE_HIT - {elapsed_ms}ms (VLM 스킵)")
 
                 cached = decision.cached_result
-                return True, cached.get("data", {}), None
+                return True, cached.get("data", {}), None, VLMErrorType.NONE
 
             # RULE_BASED: 규칙 기반 실행 (VLM 없이)
             if decision.strategy == ExecutionStrategy.RULE_BASED:
@@ -613,7 +579,7 @@ Steps:
 
         # === 2. VLM 실행이 필요한 경우 ===
         if not self._agent_runner:
-            return True, {}, None
+            return True, {}, None, VLMErrorType.NONE
 
         def on_step(step_log):
             self._add_step_to_node_logs(state, node_name, step_log)
@@ -695,7 +661,56 @@ Steps:
             node_id=node_name,
         )
 
-        # VLM 실행
+        # Orchestrator 결정에 따른 라우팅
+        if decision and decision.agent_type == "CodeAgent":
+            logger.info(f"[CoupangWorkflow] Code Agent로 라우팅: {node_name} (Orchestrator 결정)")
+            
+            from ..services.code_agent_service import get_code_agent
+            
+            try:
+                code_agent = get_code_agent()
+                desktop = self._agent_runner._current_agent.desktop if hasattr(self._agent_runner, '_current_agent') else None
+                
+                if not desktop:
+                    logger.error("[CoupangWorkflow] Desktop 인스턴스 없음")
+                    return NodeResult(
+                        success=False,
+                        data={},
+                        error="Desktop not available for Code Agent",
+                    )
+                
+                # Code Agent 실행
+                code_result = await code_agent.extract_data(
+                    desktop=desktop,
+                    task_description=enhanced_instruction,
+                )
+                
+                elapsed_ms = int((time.time() - start_time) * 1000)
+                
+                if code_result.get("success"):
+                    logger.info(f"[CoupangWorkflow] Code Agent 성공: {elapsed_ms}ms")
+                    return NodeResult(
+                        success=True,
+                        data=code_result.get("data", {}),
+                        error=None,
+                    )
+                else:
+                    logger.error(f"[CoupangWorkflow] Code Agent 실패: {code_result.get('error')}")
+                    return NodeResult(
+                        success=False,
+                        data={},
+                        error=code_result.get("error", "Code Agent failed"),
+                    )
+                
+            except Exception as e:
+                logger.error(f"[CoupangWorkflow] Code Agent 실행 오류: {e}")
+                return NodeResult(
+                    success=False,
+                    data={},
+                    error=str(e),
+                )
+
+        # VLM 실행 (Orchestrator가 VLMAgent로 결정한 경우)
         result = await self._agent_runner.run_instruction(
             enhanced_instruction,
             on_step=on_step,
@@ -754,7 +769,13 @@ Steps:
                     node_id=node_name,
                     duration_ms=elapsed_ms,
                 )
-                return False, result.data, error_message
+                # 에러 타입 매핑
+                vlm_error = VLMErrorType.UNKNOWN
+                if error_type == "bot_detected":
+                    vlm_error = VLMErrorType.BOT_DETECTED
+                elif error_type == "page_load_failed":
+                    vlm_error = VLMErrorType.PAGE_FAILED
+                return False, result.data, error_message, vlm_error
 
         # 활동 로그: VLM 실행 완료
         if result.success:
@@ -772,7 +793,7 @@ Steps:
             )
             if result.data.get("reused_from_cache"):
                 print(f"[CoupangWorkflow] {node_name}: trace 캐시에서 재사용됨")
-            return True, result.data, None
+            return True, result.data, None, VLMErrorType.NONE
         else:
             log_vlm(
                 ActivityType.ERROR,
@@ -785,92 +806,25 @@ Steps:
                 node_id=node_name,
                 duration_ms=elapsed_ms,
             )
-            return False, result.data, result.error
+            # VLM이 보고한 에러 타입 확인
+            vlm_error = VLMErrorType.UNKNOWN
+            error_type = result.data.get("error_type") if result.data else None
+            if error_type:
+                # VLM이 [ERROR:TYPE] 형식으로 보고한 에러
+                error_type_upper = error_type.upper()
+                if error_type_upper == "BOT_DETECTED":
+                    vlm_error = VLMErrorType.BOT_DETECTED
+                elif error_type_upper == "PAGE_FAILED":
+                    vlm_error = VLMErrorType.PAGE_FAILED
+                elif error_type_upper == "ACCESS_DENIED":
+                    vlm_error = VLMErrorType.ACCESS_DENIED
+            return False, result.data, result.error, vlm_error
 
-    async def _run_vlm_with_error_handling(
-        self,
-        instruction: str,
-        state: WorkflowState,
-        node_name: str,
-        max_retries: int = 3,
-    ) -> tuple[bool, Dict[str, Any], Optional[str]]:
-        """
-        에러 핸들링이 포함된 VLM 실행
-
-        Orchestrator가 에러 발생 시 재시도/스킵/중단을 결정합니다.
-        """
-        retry_count = 0
-        last_error = None
-        current_strategy = None
-
-        while retry_count <= max_retries:
-            try:
-                success, data, error = await self._run_vlm_instruction(
-                    instruction, state, node_name
-                )
-
-                if success:
-                    return True, data, None
-
-                # 실패 시 Orchestrator에게 에러 핸들링 결정 요청
-                if self._use_orchestrator and error:
-                    error_decision = await self._orchestrator.handle_error(
-                        workflow_id=self.config.id,
-                        node_id=node_name,
-                        error=Exception(error),
-                        current_retry=retry_count,
-                        strategy=current_strategy,
-                    )
-
-                    print(f"[Orchestrator] 에러 핸들링: {error_decision.action.value} "
-                          f"(retry={retry_count}/{max_retries})")
-
-                    if error_decision.action == ErrorAction.RETRY:
-                        retry_count += 1
-                        last_error = error
-                        print(f"[Orchestrator] {node_name} 재시도 {retry_count}/{max_retries}")
-                        await asyncio.sleep(2)  # 재시도 전 대기
-                        continue
-
-                    elif error_decision.action == ErrorAction.SKIP:
-                        print(f"[Orchestrator] {node_name} 스킵 (workflow 계속)")
-                        return True, {"skipped": True, "reason": error}, None
-
-                    elif error_decision.action == ErrorAction.FALLBACK:
-                        # 더 강력한 모델로 재시도
-                        if error_decision.fallback_strategy:
-                            print(f"[Orchestrator] Fallback: {error_decision.fallback_strategy.value}")
-                            retry_count += 1
-                            continue
-
-                    elif error_decision.action == ErrorAction.ABORT:
-                        print(f"[Orchestrator] {node_name} 중단 (workflow 중단)")
-                        return False, data, error
-
-                    # 사용자 알림 필요 시
-                    if error_decision.should_notify_user:
-                        print(f"[Orchestrator] ⚠️ 사용자 확인 필요: {error}")
-
-                # Orchestrator 없으면 기본 동작: 실패 반환
-                return False, data, error
-
-            except asyncio.TimeoutError as e:
-                retry_count += 1
-                last_error = f"Timeout: {str(e)}"
-                print(f"[Orchestrator] {node_name} 타임아웃, 재시도 {retry_count}/{max_retries}")
-                if retry_count > max_retries:
-                    return False, {}, last_error
-                await asyncio.sleep(2)
-
-            except Exception as e:
-                retry_count += 1
-                last_error = str(e)
-                print(f"[Orchestrator] {node_name} 예외 발생: {e}")
-                if retry_count > max_retries:
-                    return False, {}, last_error
-                await asyncio.sleep(2)
-
-        return False, {}, last_error or "Max retries exceeded"
+    # Note: _run_vlm_with_error_handling 메서드는 제거됨
+    # 에러 핸들링은 이제 LangGraph 조건부 엣지에서 처리됩니다.
+    # - workflow_base.py의 _create_router()에서 VLM 에러 타입에 따라 라우팅
+    # - retry_count는 WorkflowState에서 관리
+    # - 각 노드는 _run_vlm_instruction()만 호출하면 됨
 
     async def run(self, parameters: Dict[str, Any], thread_id: str = "default") -> WorkflowState:
         """
@@ -918,6 +872,13 @@ Steps:
             return final_state
 
         finally:
+            # 추론 로그 저장 (에이전트 정리 전)
+            try:
+                from cua2_core.routes.workflow_routes import save_reasoning_logs_before_cleanup
+                save_reasoning_logs_before_cleanup(execution_id)
+            except Exception as e:
+                print(f"[Warning] 추론 로그 저장 실패: {e}")
+
             # 정리
             if self._use_orchestrator:
                 self._orchestrator.cleanup_execution(execution_id)
@@ -952,12 +913,12 @@ Steps:
             3. Confirm you see the Coupang homepage
             """
 
-            success, data, error = await self._run_vlm_instruction(
+            success, data, error, vlm_error = await self._run_vlm_instruction(
                 instruction, state, "open_coupang"
             )
 
             if not success:
-                return NodeResult(success=False, error=error)
+                return NodeResult(success=False, error=error, vlm_error_type=vlm_error)
 
             return NodeResult(
                 success=True,
@@ -990,12 +951,12 @@ Steps:
             6. Confirm search results are displayed
             """
 
-            success, data_result, error = await self._run_vlm_instruction(
+            success, data_result, error, vlm_error = await self._run_vlm_instruction(
                 instruction, state, "search_keyword"
             )
 
             if not success:
-                return NodeResult(success=False, error=error)
+                return NodeResult(success=False, error=error, vlm_error_type=vlm_error)
 
             return NodeResult(
                 success=True,
@@ -1039,12 +1000,12 @@ Steps:
             Return the products as a JSON array with keys: name, price, url, seller
             """
 
-            success, data_result, error = await self._run_vlm_instruction(
+            success, data_result, error, vlm_error = await self._run_vlm_instruction(
                 instruction, state, "analyze_page"
             )
 
             if not success:
-                return NodeResult(success=False, error=error)
+                return NodeResult(success=False, error=error, vlm_error_type=vlm_error)
 
             # VLM이 수집한 상품 목록 (실제로는 파싱 필요)
             collected_products = data_result.get("products", [])
@@ -1060,90 +1021,64 @@ Steps:
             return NodeResult(success=False, error=str(e))
 
     async def _save_products(self, state: WorkflowState) -> NodeResult:
-        """수집한 상품을 DB에 저장"""
-        try:
-            data = state.get("data", {})
-            parameters = state.get("parameters", {})
-            keyword = data.get("current_keyword") or parameters.get("keyword")
-            pending_products = data.get("pending_products", [])
-            collected_count = data.get("collected_count", 0)
+        """상품 저장 및 다음 단계 결정"""
+        data = state.get("data", {})
+        products_data = data.get("products", [])
+        
+        # DB 저장
+        saved_count = 0
+        if products_data:
+            try:
+                # Convert dicts to CoupangProduct objects
+                products = []
+                for p in products_data:
+                    try:
+                        product = CoupangProduct(
+                            name=p.get("name", ""),
+                            price=p.get("price", ""),
+                            url=p.get("url", ""),
+                            seller=p.get("seller", ""),
+                            keyword=data.get("current_keyword", ""),
+                            is_rocket=False
+                        )
+                        products.append(product)
+                    except Exception as e:
+                        print(f"[SaveProducts] Product conversion error: {e}")
 
-            saved_count = 0
-
-            for product_data in pending_products:
-                try:
-                    # CoupangProduct 모델로 변환
-                    product = CoupangProduct(
-                        name=product_data.get("name", "Unknown"),
-                        price=product_data.get("price", 0),
-                        url=product_data.get("url", ""),
-                        seller=product_data.get("seller", ""),
-                        keyword=keyword,
-                        is_rocket=False,  # 비로켓 상품만 수집
-                    )
-
-                    # DB에 저장
-                    self._db.add_product(product)
-                    saved_count += 1
-
-                except Exception as e:
-                    print(f"[CoupangWorkflow] 상품 저장 실패: {e}")
-                    continue
-
-            return NodeResult(
-                success=True,
-                data={
-                    "collected_count": collected_count + saved_count,
-                    "last_saved_count": saved_count,
-                    "pending_products": [],  # 저장 완료 후 비우기
-                }
-            )
-        except Exception as e:
-            return NodeResult(success=False, error=str(e))
-
-    async def _check_next_page(self, state: WorkflowState) -> NodeResult:
-        """다음 페이지 확인 및 이동"""
-        try:
-            data = state.get("data", {})
-            parameters = state.get("parameters", {})
-
-            current_page = data.get("current_page", 1)
-            max_pages = parameters.get("max_pages", 5)
-
-            # 최대 페이지 도달 확인
-            if current_page >= max_pages:
-                return NodeResult(
-                    success=False,  # on_failure -> find_related
-                    data={"max_pages_reached": True}
-                )
-
-            instruction = """
-            Check if there is a next page and navigate to it:
-
-            Steps:
-            1. Scroll to the bottom of the page to find pagination
-            2. Look for pagination controls (page numbers or "다음" button)
-            3. If next page exists, click on the next page number or "다음" button
-            4. Wait for the new page to load using wait(3)
-            5. If no next page available, report "no_next_page"
-            """
-
-            success, data_result, error = await self._run_vlm_instruction(
-                instruction, state, "check_next_page"
-            )
-
-            if not success or data_result.get("no_next_page"):
-                return NodeResult(
-                    success=False,  # on_failure -> find_related
-                    data={"no_more_pages": True}
-                )
-
-            return NodeResult(
-                success=True,  # on_success -> analyze_page
-                data={"current_page": current_page + 1}
-            )
-        except Exception as e:
-            return NodeResult(success=False, error=str(e))
+                if products:
+                    saved_count = await self._db.save_products(products)
+                    print(f"[SaveProducts] Saved {saved_count} products")
+            except Exception as e:
+                print(f"[SaveProducts] DB Error: {e}")
+                # DB 에러나도 워크플로우는 계속 진행
+        
+        # 누적 카운트 업데이트
+        total_collected = data.get("collected_count", 0) + saved_count
+        pages_analyzed = data.get("pages_analyzed", 0) + 1
+        
+        # 다음 페이지 클릭 여부 확인
+        next_page_clicked = data.get("next_page_clicked", False)
+        max_pages = state.get("parameters", {}).get("max_pages", 5)
+        
+        # 다음 단계 결정
+        next_node = "analyze_page"  # 기본값: 다음 페이지 분석
+        
+        if not next_page_clicked:
+            print("[SaveProducts] No next page clicked -> Find related keywords")
+            next_node = "find_related"
+        elif pages_analyzed >= max_pages:
+            print(f"[SaveProducts] Max pages reached ({pages_analyzed}) -> Find related keywords")
+            next_node = "find_related"
+            
+        return NodeResult(
+            success=True, 
+            next_node=next_node,
+            data={
+                "collected_count": total_collected,
+                "pages_analyzed": pages_analyzed,
+                "last_saved": saved_count
+            }
+        )
 
     async def _find_related(self, state: WorkflowState) -> NodeResult:
         """연관 키워드 탐색"""
@@ -1171,14 +1106,15 @@ Steps:
             5. If no new related keywords exist, report "no_related_found"
             """
 
-            success, data_result, error = await self._run_vlm_instruction(
+            success, data_result, error, vlm_error = await self._run_vlm_instruction(
                 instruction, state, "find_related"
             )
 
             if not success or data_result.get("no_related_found"):
                 return NodeResult(
                     success=False,  # on_failure -> complete
-                    data={"no_related_keywords": True}
+                    data={"no_related_keywords": True},
+                    vlm_error_type=vlm_error if not success else VLMErrorType.NONE
                 )
 
             new_keyword = data_result.get("related_keyword")
@@ -1213,11 +1149,56 @@ Steps:
         )
 
     async def _error_handler(self, state: WorkflowState) -> NodeResult:
-        """에러 처리 및 복구"""
+        """에러 처리 및 복구 (CommonSubgraphs 활용)"""
         error = state.get("error", "Unknown error")
-        print(f"[CoupangWorkflow] Error handled: {error}")
+        vlm_error = state.get("vlm_error_type", VLMErrorType.UNKNOWN)
+        retry_count = state.get("retry_count", 0)
+        max_retries = 3
 
-        # 복구 시도: 에러를 기록하고 완료 단계로 이동하여 부분 성공 처리 (Graceful Shutdown)
+        print(f"[CoupangWorkflow] Error handled: {error}, type={vlm_error}, retry={retry_count}")
+
+        # CommonSubgraphs 유틸리티로 재시도 여부 결정
+        should_retry = CommonSubgraphs.should_retry(state, max_retries)
+
+        if should_retry:
+            # 재시도 가능한 에러: 이전 노드로 되돌아가기
+            current_node = state.get("current_node", "")
+            failed_nodes = state.get("failed_nodes", [])
+
+            # 마지막 실패 노드 찾기
+            retry_node = failed_nodes[-1] if failed_nodes else None
+
+            if retry_node:
+                print(f"[CoupangWorkflow] 재시도 중: {retry_node} ({retry_count + 1}/{max_retries})")
+                return NodeResult(
+                    success=True,
+                    data={
+                        "error": None,
+                        "vlm_error_type": None,
+                        "retry_count": retry_count + 1,
+                        "_retry_action": True,
+                    },
+                    next_node=retry_node  # 이전 노드로 재시도
+                )
+
+        # 봇 감지 등 치명적 에러: 즉시 종료
+        if vlm_error == VLMErrorType.BOT_DETECTED:
+            print(f"[CoupangWorkflow] ⚠️ 봇 감지됨 - 워크플로우 중단")
+            # 활동 로그에 봇 감지 기록
+            log_vlm(
+                ActivityType.ERROR,
+                "봇 감지로 인한 워크플로우 중단",
+                details={"error": error, "vlm_error_type": str(vlm_error)},
+                execution_id=state.get("execution_id", ""),
+                node_id="error_handler",
+            )
+            return NodeResult(
+                success=True,
+                data={"error_handled": True, "original_error": error, "bot_detected": True},
+                next_node="complete"
+            )
+
+        # 기본: 부분 성공으로 처리 (Graceful Shutdown)
         return NodeResult(
             success=True,
             data={"error_handled": True, "original_error": error},

@@ -41,6 +41,15 @@ export interface WorkflowNode {
   reuse_trace?: boolean;  // 이전 trace 재사용 여부
   share_memory?: boolean;  // 메모리 공유 여부
   cache_key_params?: string[];  // 캐시 키에 사용할 파라미터
+  // 에이전트 정보
+  agent_type?: string;  // VLMAgent, SearchAgent, AnalysisAgent 등
+  model_id?: string;    // local-qwen3-vl, gpt-4o 등
+  // 클릭/UI 설정
+  clickable?: boolean;  // 클릭 가능 여부 (상세 보기)
+  // 시간 설정
+  timeout_sec?: number;      // 타임아웃 (초)
+  avg_duration_sec?: number; // 평균 실행 시간 (초)
+  metadata?: Record<string, any>; // 노드 메타데이터 (Props)
 }
 
 export interface WorkflowEdge {

@@ -9,6 +9,7 @@ from cua2_core.routes.workflow_routes import router as workflow_router
 from cua2_core.routes.trace_routes import router as trace_router
 from cua2_core.routes.workflow_websocket import router as workflow_ws_router
 from cua2_core.routes.agent_activity_routes import router as agent_activity_router
+from cua2_core.routes.library_routes import router as library_router
 
 # Include routes
 app.include_router(router, prefix="/api")
@@ -18,6 +19,7 @@ app.include_router(workflow_router)  # /api/workflows/* 엔드포인트
 app.include_router(trace_router)  # /api/traces/* 엔드포인트
 app.include_router(workflow_ws_router)  # /ws/workflow/* WebSocket 엔드포인트
 app.include_router(agent_activity_router)  # /api/agents/* 에이전트 활동 로그
+app.include_router(library_router)  # /api/library/* 라이브러리 정보
 
 
 # Health check endpoint (without prefix)

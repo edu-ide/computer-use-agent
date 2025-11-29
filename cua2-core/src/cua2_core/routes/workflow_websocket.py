@@ -165,8 +165,7 @@ async def workflow_websocket_endpoint(websocket: WebSocket, execution_id: str):
                 "last_error": agent_state.get("last_error") if agent_state else None,
             }
 
-            # 디버깅: 상태 로깅
-            print(f"[WS] Sending status: current_node={current_node}, completed={state.get('completed_nodes', [])}, status={state.get('status')}")
+            # 디버깅: 상태 변경 시에만 로깅 (매번 로깅하지 않음)
 
             await websocket.send_json(status_message)
 

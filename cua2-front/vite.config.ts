@@ -8,6 +8,16 @@ export default defineConfig(({ mode }) => ({
     host: "::",
     port: 3000,  // 8080, 8081은 llama.cpp 서버용으로 예약
     strictPort: false,  // 포트 사용 중이면 다음 포트 시도
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+      '/ws': {
+        target: 'ws://localhost:8000',
+        ws: true,
+      },
+    },
   },
   plugins: [react()],
   resolve: {

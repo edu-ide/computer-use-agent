@@ -103,6 +103,11 @@ export interface WorkflowDefinition {
     reuse_trace?: boolean;
     share_memory?: boolean;
     cache_key_params?: string[];
+    // 에이전트 정보
+    agent_type?: string;  // VLMAgent, SearchAgent, AnalysisAgent 등
+    model_id?: string;    // local-qwen3-vl, gpt-4o 등
+    // 클릭 가능 여부
+    clickable?: boolean;
   }>;
   edges: Array<{
     source: string;
@@ -215,6 +220,11 @@ const WorkflowGraphInner: React.FC<WorkflowGraphProps> = ({
           reuseTrace: nodeDef.reuse_trace,
           shareMemory: nodeDef.share_memory,
           cacheKeyParams: nodeDef.cache_key_params,
+          // 에이전트 정보 (snake_case → camelCase)
+          agentType: nodeDef.agent_type,
+          modelId: nodeDef.model_id,
+          // 클릭 가능 여부
+          clickable: nodeDef.clickable,
         },
         sourcePosition: Position.Right,
         targetPosition: Position.Left,

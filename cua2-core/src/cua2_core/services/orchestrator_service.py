@@ -75,6 +75,10 @@ class ExecutionDecision:
     estimated_cost: float = 0.0
     confidence: float = 1.0
 
+    # Orchestrator가 결정한 실행 설정
+    agent_type: str = "VLMAgent"  # "VLMAgent" or "CodeAgent"
+    max_tokens: int = 1024  # 최대 출력 토큰 수
+
     # Orchestrator가 판단한 재사용 설정
     reusable: bool = False  # 이 노드의 결과를 재사용 가능한지
     reuse_trace: bool = False  # trace를 캐시할지
@@ -263,6 +267,10 @@ class OrchestratorService:
     # Orchestrator-8B 서버 설정
     ORCHESTRATOR_API_URL = "http://localhost:8081/v1/chat/completions"
     ORCHESTRATOR_TIMEOUT = 5.0  # 5초 타임아웃 (빠른 판단 필요)
+
+    # Note: Rule-based BOT_DETECTION_PATTERNS / FAILURE_PATTERNS 제거됨
+    # VLM이 스크린샷을 보고 직접 [ERROR:TYPE] 형식으로 보고함
+    # LangGraph 조건부 엣지에서 에러 타입별 라우팅 처리
 
     def __init__(
         self,
@@ -460,12 +468,14 @@ class OrchestratorService:
             complexity=complexity,
             learned_settings=learned_settings,
             instruction=instruction,
+            node_config=node_config,  # 노드 설정 전달
         )
 
         elapsed_ms = int((time.time() - start_time) * 1000)
         logger.info(
             f"[Orchestrator] {node_id}: {decision.strategy.value} "
-            f"(model={decision.model_id}, complexity={complexity.complexity_score:.2f}, "
+            f"(agent={decision.agent_type}, model={decision.model_id}, "
+            f"max_tokens={decision.max_tokens}, complexity={complexity.complexity_score:.2f}, "
             f"decision_time={elapsed_ms}ms)"
         )
 
@@ -487,6 +497,14 @@ class OrchestratorService:
         if node_config:
             cache_key_params = getattr(node_config, 'cache_key_params', [])
             reuse_trace = getattr(node_config, 'reuse_trace', False)
+
+        # 학습된 설정 확인 (노드 설정보다 우선)
+        learned_settings = self._reuse_analyzer.get_recommended_settings(node_id, workflow_id)
+        if learned_settings.get("confidence", 0) > 0.7:
+            # 학습된 설정이 신뢰도 높으면 사용
+            reuse_trace = learned_settings.get("reuse_trace", reuse_trace)
+            cache_key_params = learned_settings.get("cache_key_params", cache_key_params)
+            logger.debug(f"[Orchestrator] {node_id}: 학습된 reuse_trace={reuse_trace} 사용")
 
         if not reuse_trace:
             return None
@@ -595,10 +613,44 @@ class OrchestratorService:
         complexity: NodeComplexity,
         learned_settings: Dict[str, Any],
         instruction: str,
+        node_config: Optional[Any] = None,
     ) -> ExecutionDecision:
         """최적 실행 전략 선택"""
 
         score = complexity.complexity_score
+
+        # 학습된 재사용 설정 추출
+        use_learned = learned_settings.get("confidence", 0) > 0.7
+        learned_reusable = learned_settings.get("reusable", False) if use_learned else False
+        learned_reuse_trace = learned_settings.get("reuse_trace", False) if use_learned else False
+        learned_share_memory = learned_settings.get("share_memory", False) if use_learned else False
+        learned_cache_key_params = learned_settings.get("cache_key_params", []) if use_learned else []
+
+        # node_type 확인 (extract_data인 경우 Code Agent 사용)
+        node_type = getattr(node_config, 'node_type', None) if node_config else None
+        
+        # Agent 타입 및 max_tokens 결정
+        if node_type == "extract_data":
+            # Code Agent 사용
+            agent_type = "CodeAgent"
+            model_id = "Orchestrator-8B"
+            max_tokens = 2048  # JS 생성에는 더 많은 토큰 필요
+            strategy = ExecutionStrategy.CLOUD_HEAVY  # Code Agent는 복잡한 분석
+        else:
+            # VLM Agent 사용
+            agent_type = "VLMAgent"
+            
+            # 복잡도에 따른 max_tokens 설정
+            if score >= self.COMPLEXITY_THRESHOLDS["complex"]:
+                max_tokens = 4096  # 복잡한 작업
+            elif score >= self.COMPLEXITY_THRESHOLDS["medium"]:
+                max_tokens = 2048  # 중간 복잡도
+            else:
+                max_tokens = 1024  # 단순 작업
+            
+            # 기존 전략 선택 로직
+            model_id = None
+            strategy = ExecutionStrategy.CLOUD_HEAVY
 
         # 1. 규칙 기반으로 처리 가능한 경우 (가장 빠름)
         if self._can_use_rule_based(node_id, instruction):
@@ -609,9 +661,32 @@ class OrchestratorService:
                 estimated_time_ms=50,
                 estimated_cost=0.0,
                 confidence=0.95,
+                agent_type="VLMAgent",  # 규칙 기반도 VLM
+                max_tokens=512,  # 규칙 기반은 짧은 응답
+                reusable=learned_reusable,
+                reuse_trace=learned_reuse_trace,
+                share_memory=learned_share_memory,
+                cache_key_params=learned_cache_key_params,
             )
 
-        # 2. 복잡도에 따른 모델 선택
+        # 2. Code Agent 결정이 내려진 경우
+        if agent_type == "CodeAgent":
+            return ExecutionDecision(
+                strategy=ExecutionStrategy.CLOUD_HEAVY,
+                model_id=model_id,
+                reason=f"데이터 추출 작업 (node_type=extract_data)",
+                estimated_time_ms=3000,  # Code Agent는 시간이 좀 걸림
+                estimated_cost=0.001,
+                confidence=0.9,
+                agent_type=agent_type,
+                max_tokens=max_tokens,
+                reusable=learned_reusable,
+                reuse_trace=learned_reuse_trace,
+                share_memory=learned_share_memory,
+                cache_key_params=learned_cache_key_params,
+            )
+
+        # 3. VLM Agent - 복잡도에 따른 모델 선택
         if score <= self.COMPLEXITY_THRESHOLDS["simple"]:
             # 단순 작업 - 로컬 모델
             if self._prefer_local:
@@ -622,6 +697,12 @@ class OrchestratorService:
                     estimated_time_ms=self.MODELS["local-qwen-vl"].avg_latency_ms,
                     estimated_cost=0.0,
                     confidence=0.85,
+                    agent_type=agent_type,
+                    max_tokens=max_tokens,
+                    reusable=learned_reusable,
+                    reuse_trace=learned_reuse_trace,
+                    share_memory=learned_share_memory,
+                    cache_key_params=learned_cache_key_params,
                 )
             else:
                 return ExecutionDecision(
@@ -631,6 +712,12 @@ class OrchestratorService:
                     estimated_time_ms=self.MODELS["gpt-4o-mini"].avg_latency_ms,
                     estimated_cost=self.MODELS["gpt-4o-mini"].cost_per_1k_tokens * 2,
                     confidence=0.9,
+                    agent_type=agent_type,
+                    max_tokens=max_tokens,
+                    reusable=learned_reusable,
+                    reuse_trace=learned_reuse_trace,
+                    share_memory=learned_share_memory,
+                    cache_key_params=learned_cache_key_params,
                 )
 
         elif score <= self.COMPLEXITY_THRESHOLDS["medium"]:
@@ -642,6 +729,12 @@ class OrchestratorService:
                 estimated_time_ms=self.MODELS["gpt-4o-mini"].avg_latency_ms,
                 estimated_cost=self.MODELS["gpt-4o-mini"].cost_per_1k_tokens * 3,
                 confidence=0.85,
+                agent_type=agent_type,
+                max_tokens=max_tokens,
+                reusable=learned_reusable,
+                reuse_trace=learned_reuse_trace,
+                share_memory=learned_share_memory,
+                cache_key_params=learned_cache_key_params,
             )
 
         elif score <= self.COMPLEXITY_THRESHOLDS["complex"]:
@@ -653,6 +746,12 @@ class OrchestratorService:
                 estimated_time_ms=self.MODELS["gpt-4o"].avg_latency_ms,
                 estimated_cost=self.MODELS["gpt-4o"].cost_per_1k_tokens * 5,
                 confidence=0.9,
+                agent_type=agent_type,
+                max_tokens=max_tokens,
+                reusable=learned_reusable,
+                reuse_trace=learned_reuse_trace,
+                share_memory=learned_share_memory,
+                cache_key_params=learned_cache_key_params,
             )
 
         else:
@@ -664,6 +763,12 @@ class OrchestratorService:
                 estimated_time_ms=self.MODELS["claude-sonnet"].avg_latency_ms,
                 estimated_cost=self.MODELS["claude-sonnet"].cost_per_1k_tokens * 5,
                 confidence=0.95,
+                agent_type=agent_type,
+                max_tokens=max_tokens,
+                reusable=learned_reusable,
+                reuse_trace=learned_reuse_trace,
+                share_memory=learned_share_memory,
+                cache_key_params=learned_cache_key_params,
             )
 
     def _can_use_rule_based(self, node_id: str, instruction: str) -> bool:
@@ -1003,75 +1108,15 @@ Instruction: {instruction}"""
         "analyze": 180,
     }
 
-    # 에러 타입별 기본 액션
-    ERROR_ACTIONS = {
-        "timeout": ErrorAction.RETRY,
-        "network": ErrorAction.RETRY,
-        "element_not_found": ErrorAction.SKIP,
-        "navigation_failed": ErrorAction.RETRY,
-        "api_error": ErrorAction.FALLBACK,
-        "bot_detected": ErrorAction.ABORT,  # 봇 감지 시 즉시 중단
-        "page_load_failed": ErrorAction.RETRY,  # 페이지 로딩 실패는 재시도
-        "unknown": ErrorAction.ABORT,
-    }
+    # Note: 에러 타입별 액션은 LangGraph 조건부 엣지로 이동됨
+    # workflow_base.py의 _create_router()에서 VLM 에러 타입에 따라 라우팅
+    # - BOT_DETECTED → 즉시 중단
+    # - PAGE_FAILED/TIMEOUT → 재시도 (max_retries까지)
+    # - ELEMENT_NOT_FOUND → 스킵
+    # - ACCESS_DENIED → 중단
 
-    # 봇 감지 패턴 (즉시 중단)
-    BOT_DETECTION_PATTERNS = [
-        "access denied",
-        "액세스 거부",
-        "접근이 거부",
-        "접근 거부",
-        "bot detected",
-        "봇이 감지",
-        "captcha",
-        "캡차",
-        "robot",
-        "로봇이 아닙니다",
-        "are you a robot",
-        "unusual traffic",
-        "비정상적인 트래픽",
-        "too many requests",
-        "rate limit",
-        "blocked",
-        "차단되었습니다",
-        "forbidden",
-        "403",
-        "please verify you are a human",
-        "human verification",
-    ]
-
-    # 실패 패턴 (페이지 로딩 실패 등)
-    FAILURE_PATTERNS = [
-        "could not be loaded",
-        "로드할 수 없",
-        "로딩 실패",
-        "failed to load",
-        "screen is black",
-        "screen remains black",
-        "검은 화면",
-        "화면이 검",
-        "page not found",
-        "페이지를 찾을 수 없",
-        "connection refused",
-        "연결 거부",
-        "network error",
-        "네트워크 오류",
-        "unable to",
-        "cannot access",
-        "접근할 수 없",
-        "not visible",
-        "보이지 않",
-        "profile cannot be loaded",
-        "프로필을 로드할 수 없",
-        "already running",
-        "이미 실행 중",
-        "not responding",
-        "응답하지 않",
-        "screen is blank",
-        "blank screen",
-        "빈 화면",
-        "화면이 비어",
-    ]
+    # Note: Rule-based 패턴 체크 완전 제거됨
+    # VLM이 스크린샷을 보고 직접 [ERROR:TYPE] 형식으로 보고함
 
     def get_node_timeout(self, node_id: str, instruction: str) -> int:
         """노드별 타임아웃 시간 반환 (초)"""
@@ -1093,7 +1138,15 @@ Instruction: {instruction}"""
         strategy: Optional[ExecutionStrategy] = None,
     ) -> ErrorDecision:
         """
-        에러 발생 시 처리 방법 결정
+        [DEPRECATED] 에러 발생 시 처리 방법 결정
+
+        Note: 이 메서드는 LangGraph 조건부 엣지로 대체되었습니다.
+        workflow_base.py의 _create_router()에서 VLM 에러 타입에 따라 라우팅합니다.
+        - VLM이 [ERROR:TYPE] 형식으로 에러 보고
+        - LangGraph router가 에러 타입에 따라 retry/skip/abort 결정
+
+        이 메서드는 레거시 호환성을 위해 유지되지만, 새로운 워크플로우에서는
+        LangGraph 에러 핸들링을 사용해야 합니다.
 
         Args:
             workflow_id: 워크플로우 ID
@@ -1105,11 +1158,28 @@ Instruction: {instruction}"""
         Returns:
             ErrorDecision: 에러 처리 결정
         """
-        error_str = str(error).lower()
-        error_type = self._classify_error(error_str)
+        import warnings
+        warnings.warn(
+            "handle_error()는 deprecated입니다. LangGraph 조건부 엣지를 사용하세요.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
-        # 기본 액션 결정
-        default_action = self.ERROR_ACTIONS.get(error_type, ErrorAction.ABORT)
+        error_str = str(error).lower()
+        error_type = self._classify_error_legacy(error_str)
+
+        # 레거시 기본 액션
+        legacy_error_actions = {
+            "timeout": ErrorAction.RETRY,
+            "network": ErrorAction.RETRY,
+            "element_not_found": ErrorAction.SKIP,
+            "navigation_failed": ErrorAction.RETRY,
+            "api_error": ErrorAction.FALLBACK,
+            "bot_detected": ErrorAction.ABORT,
+            "page_load_failed": ErrorAction.RETRY,
+            "unknown": ErrorAction.ABORT,
+        }
+        default_action = legacy_error_actions.get(error_type, ErrorAction.ABORT)
 
         # Orchestrator-8B로 더 정교한 결정
         if self._use_orchestrator_model:
@@ -1176,23 +1246,15 @@ Instruction: {instruction}"""
 
         return decision
 
-    def _classify_error(self, error_str: str) -> str:
-        """에러 분류"""
+    def _classify_error_legacy(self, error_str: str) -> str:
+        """
+        [DEPRECATED] 레거시 에러 분류
+
+        Note: 새로운 워크플로우에서는 VLM이 [ERROR:TYPE] 형식으로 에러를 보고하므로
+        이 메서드는 사용되지 않습니다.
+        """
         error_lower = error_str.lower()
 
-        # 1. 봇 감지 패턴 체크 (최우선)
-        for pattern in self.BOT_DETECTION_PATTERNS:
-            if pattern.lower() in error_lower:
-                logger.warning(f"[Orchestrator] 봇 감지 패턴 발견: '{pattern}'")
-                return "bot_detected"
-
-        # 2. 페이지 로딩 실패 패턴 체크
-        for pattern in self.FAILURE_PATTERNS:
-            if pattern.lower() in error_lower:
-                logger.warning(f"[Orchestrator] 실패 패턴 발견: '{pattern}'")
-                return "page_load_failed"
-
-        # 3. 기존 에러 분류
         if "timeout" in error_lower or "timed out" in error_lower:
             return "timeout"
         elif "network" in error_lower or "connection" in error_lower:
@@ -1278,82 +1340,16 @@ Instruction: {instruction}"""
                                 learned_pattern=pattern,
                             )
 
-        # 1. 봇 감지 패턴 체크 (최우선 - 즉시 중단)
-        for text in [thought, observation, screenshot_analysis]:
-            if text:
-                for pattern in self.BOT_DETECTION_PATTERNS:
-                    if pattern.lower() in text.lower():
-                        logger.error(f"[Orchestrator] 스텝 {step_number}: 봇 감지! pattern='{pattern}'")
-                        log_orchestrator(
-                            ActivityType.ERROR,
-                            f"봇 감지 (스텝 {step_number})",
-                            details={"pattern": pattern, "node_id": node_id},
-                            execution_id=workflow_id,
-                            node_id=node_id,
-                        )
-                        return StepFeedback(
-                            action=StepAction.STOP,
-                            reason=f"봇 감지 패턴 발견: {pattern}",
-                            learned_pattern=pattern,
-                        )
+        # Note: Rule-based 봇 감지/실패 패턴 체크 제거됨
+        # VLM이 스크린샷을 보고 직접 [ERROR:TYPE] 형식으로 에러를 보고함
+        # LangGraph 조건부 엣지에서 에러 타입별 라우팅 처리
 
-        # 2. 실패 패턴 체크 (반복 실패 감지 포함)
+        # 반복 상황 트래킹용
         tracking_key = f"{workflow_id}:{node_id}"
         if not hasattr(self, "_failure_tracking"):
             self._failure_tracking = {}
 
-        for text in [thought, observation]:
-            if text:
-                for pattern in self.FAILURE_PATTERNS:
-                    if pattern.lower() in text.lower():
-                        # Found failure pattern
-                        logger.warning(f"[Orchestrator] 스텝 {step_number}: 실패 패턴 '{pattern}'")
-                        
-                        # Track failure
-                        tracking = self._failure_tracking.get(tracking_key, {"count": 0, "last_pattern": ""})
-                        if tracking["last_pattern"] == pattern:
-                            tracking["count"] += 1
-                        else:
-                            tracking["count"] = 1
-                            tracking["last_pattern"] = pattern
-                        self._failure_tracking[tracking_key] = tracking
-
-                        # 2회 이상 반복 시 중단 (Early Stop)
-                        if tracking["count"] >= 2:
-                             log_orchestrator(
-                                ActivityType.ERROR,
-                                f"반복적인 실패 감지: {pattern} ({tracking['count']}회)",
-                                details={"pattern": pattern, "node_id": node_id},
-                                execution_id=workflow_id,
-                                node_id=node_id,
-                             )
-                             return StepFeedback(
-                                 action=StepAction.STOP,
-                                 reason=f"반복적인 실패 패턴 감지: {pattern}",
-                                 learned_pattern=pattern,
-                                 save_to_memory={"pattern": pattern, "reason": f"반복적인 실패 ({tracking['count']}회)"}
-                             )
-
-                        log_orchestrator(
-                            ActivityType.WARNING,
-                            f"실패 패턴 감지 (스텝 {step_number})",
-                            details={"pattern": pattern, "node_id": node_id},
-                            execution_id=workflow_id,
-                            node_id=node_id,
-                        )
-                        # 실패 시 복구 프롬프트 주입
-                        return StepFeedback(
-                            action=StepAction.INJECT_PROMPT,
-                            reason=f"실패 패턴 발견: {pattern}",
-                            injected_prompt=self.SITUATION_PROMPTS.get("error_recovery", ""),
-                            learned_pattern=pattern,
-                        )
-
-        # 실패 패턴이 없으면 트래킹 초기화
-        if tracking_key in self._failure_tracking:
-             self._failure_tracking[tracking_key] = {"count": 0, "last_pattern": ""}
-
-        # 3. 상황별 프롬프트 주입 체크 (반복 감지 포함)
+        # 1. 상황별 프롬프트 주입 체크 (반복 감지 포함)
         feedback = self._check_situation_and_inject(
             thought=thought,
             observation=observation,
@@ -1634,7 +1630,10 @@ Instruction: {instruction}"""
         last_thought: Optional[str] = None,
     ) -> Tuple[bool, Optional[str], Optional[str]]:
         """
-        VLM 실행 결과 검증 - 봇 감지 및 실패 패턴 체크
+        VLM 실행 결과 검증 - VLM이 보고한 [ERROR:TYPE] 에러 확인
+
+        Note: Rule-based 패턴 체크 제거됨.
+              VLM이 스크린샷을 보고 직접 [ERROR:TYPE] 형식으로 보고함.
 
         Args:
             workflow_id: 워크플로우 ID
@@ -1647,57 +1646,36 @@ Instruction: {instruction}"""
         Returns:
             Tuple[is_valid, error_type, error_message]
             - is_valid: 결과가 유효한지
-            - error_type: 에러 타입 ("bot_detected", "page_load_failed", None)
+            - error_type: 에러 타입 (VLM이 보고한 타입)
             - error_message: 에러 메시지
         """
-        # 체크할 텍스트들 수집
-        texts_to_check = []
-        if final_answer:
-            texts_to_check.append(("final_answer", final_answer))
-        if last_observation:
-            texts_to_check.append(("observation", last_observation))
-        if last_thought:
-            texts_to_check.append(("thought", last_thought))
+        import re
 
-        # 1. 봇 감지 패턴 체크 (최우선 - 즉시 중단)
-        for source, text in texts_to_check:
-            text_lower = text.lower()
-            for pattern in self.BOT_DETECTION_PATTERNS:
-                if pattern.lower() in text_lower:
-                    logger.error(f"[Orchestrator] 봇 감지! node={node_id}, pattern='{pattern}', source={source}")
-                    log_orchestrator(
-                        ActivityType.ERROR,
-                        f"봇 감지: {node_id}",
-                        details={
-                            "pattern": pattern,
-                            "source": source,
-                            "text_preview": text[:100],
-                        },
-                        execution_id=workflow_id,
-                        node_id=node_id,
-                    )
-                    return False, "bot_detected", f"봇 감지 패턴 발견: {pattern}"
+        # VLM이 보고한 에러 타입 체크 ([ERROR:TYPE] 형식)
+        texts_to_check = [final_answer, last_observation, last_thought]
 
-        # 2. 실패 패턴 체크
-        for source, text in texts_to_check:
-            text_lower = text.lower()
-            for pattern in self.FAILURE_PATTERNS:
-                if pattern.lower() in text_lower:
-                    logger.warning(f"[Orchestrator] 실패 패턴! node={node_id}, pattern='{pattern}', source={source}")
-                    log_orchestrator(
-                        ActivityType.WARNING if source != "final_answer" else ActivityType.ERROR,
-                        f"실패 패턴: {node_id}",
-                        details={
-                            "pattern": pattern,
-                            "source": source,
-                            "text_preview": text[:100],
-                        },
-                        execution_id=workflow_id,
-                        node_id=node_id,
-                    )
-                    return False, "page_load_failed", f"실패 패턴 발견: {pattern}"
+        for text in texts_to_check:
+            if not text:
+                continue
 
-        # 3. 모든 체크 통과
+            # [ERROR:TYPE] 패턴 검색
+            error_match = re.search(r'\[ERROR:(\w+)\]', text, re.IGNORECASE)
+            if error_match:
+                error_type = error_match.group(1).lower()
+                logger.warning(f"[Orchestrator] VLM 에러 보고: node={node_id}, type={error_type}")
+                log_orchestrator(
+                    ActivityType.ERROR,
+                    f"VLM 에러 보고: {node_id}",
+                    details={
+                        "error_type": error_type,
+                        "text_preview": text[:100],
+                    },
+                    execution_id=workflow_id,
+                    node_id=node_id,
+                )
+                return False, error_type, f"VLM 에러 보고: {error_type}"
+
+        # 에러 없음 - 유효한 결과
         return True, None, None
 
     async def _query_error_handling(

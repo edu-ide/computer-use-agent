@@ -18,7 +18,9 @@ from .workflow_base import (
     WorkflowState,
     NodeResult,
     NodeStatus,
+    VLMErrorType,
 )
+from .common_subgraphs import CommonSubgraphs
 
 
 class YouTubeContentWorkflow(WorkflowBase):
@@ -158,6 +160,10 @@ class YouTubeContentWorkflow(WorkflowBase):
                 description="유튜브 스튜디오에서 영상 업로드",
                 on_success="complete",
                 on_failure="error_handler",
+                # Human-in-the-Loop: 업로드 전 사용자 확인 필요
+                requires_confirmation=True,
+                confirmation_message="유튜브에 영상을 업로드하시겠습니까? 이 작업은 되돌릴 수 없습니다.",
+                is_dangerous=True,
             ),
             WorkflowNode(
                 name="complete",
@@ -562,12 +568,37 @@ class YouTubeContentWorkflow(WorkflowBase):
         )
 
     async def _error_handler(self, state: WorkflowState) -> NodeResult:
-        """에러 처리"""
+        """에러 처리 (CommonSubgraphs 활용)"""
         error = state.get("error", "Unknown error")
-        print(f"[YouTubeWorkflow] Error: {error}")
+        vlm_error = state.get("vlm_error_type", VLMErrorType.UNKNOWN)
+        retry_count = state.get("retry_count", 0)
+        max_retries = 3
 
+        print(f"[YouTubeWorkflow] Error: {error}, type={vlm_error}, retry={retry_count}")
+
+        # CommonSubgraphs 유틸리티로 재시도 여부 결정
+        should_retry = CommonSubgraphs.should_retry(state, max_retries)
+
+        if should_retry:
+            # 재시도 가능한 에러: 이전 노드로 되돌아가기
+            failed_nodes = state.get("failed_nodes", [])
+            retry_node = failed_nodes[-1] if failed_nodes else None
+
+            if retry_node:
+                print(f"[YouTubeWorkflow] 재시도: {retry_node} ({retry_count + 1}/{max_retries})")
+                return NodeResult(
+                    success=True,
+                    data={
+                        "error": None,
+                        "vlm_error_type": None,
+                        "retry_count": retry_count + 1,
+                    },
+                    next_node=retry_node
+                )
+
+        # 치명적 에러 또는 재시도 한도 초과: 부분 성공으로 완료
         return NodeResult(
-            success=False,
-            error=error,
-            data={"error_handled": True}
+            success=True,
+            data={"error_handled": True, "original_error": error},
+            next_node="complete"
         )

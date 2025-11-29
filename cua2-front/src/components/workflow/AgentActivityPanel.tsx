@@ -239,6 +239,7 @@ const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({
         top: 16,
         left: 16,
         width: collapsed ? 200 : expanded ? 500 : 400,
+        height: collapsed ? 'auto' : expanded ? '80vh' : 500,
         maxHeight: collapsed ? 'auto' : expanded ? '80vh' : 500,
         zIndex: 10,
         overflow: 'hidden',
@@ -321,7 +322,7 @@ const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({
         </MenuItem>
       </Menu>
 
-      <Collapse in={!collapsed}>
+      <Collapse in={!collapsed} sx={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
         {/* 검색 및 필터 */}
         <Box
           sx={{
@@ -333,6 +334,7 @@ const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({
             bgcolor: 'action.hover',
             borderBottom: '1px solid',
             borderColor: 'divider',
+            flexShrink: 0,
           }}
         >
           <TextField
@@ -408,6 +410,7 @@ const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({
             gap: 0.5,
             flexWrap: 'wrap',
             bgcolor: 'background.paper',
+            flexShrink: 0,
           }}
         >
           {agents.map((agent) => (
@@ -447,7 +450,9 @@ const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({
         <Box
           sx={{
             flex: 1,
+            minHeight: 0, // flex 컨테이너에서 스크롤 허용을 위해 필수
             overflow: 'auto',
+            overflowY: 'scroll', // 항상 스크롤바 표시
             // 스크롤바 스타일링 (항상 표시)
             '&::-webkit-scrollbar': {
               width: 8,

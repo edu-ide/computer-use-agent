@@ -13,6 +13,9 @@ Letta(MemGPT)를 사용하여 에이전트가 스스로 메모리를 관리하�
 
 import os
 import logging
+import sqlite3
+import json
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
 
@@ -125,33 +128,366 @@ class WorkflowMemoryConfig:
         )
 
 
+class SQLiteMemoryStore:
+    """
+    SQLite 기반 메모리 영구 저장소
+
+    Features:
+    - 메모리 블록 버전 히스토리
+    - 타임스탬프 기반 검색
+    - 효율적인 쿼리
+    """
+
+    def __init__(self, db_path: Optional[str] = None):
+        """
+        Args:
+            db_path: SQLite 데이터베이스 경로 (기본값: ~/.cua2/memory.db)
+        """
+        if db_path is None:
+            data_dir = os.path.join(os.path.expanduser("~"), ".cua2")
+            os.makedirs(data_dir, exist_ok=True)
+            db_path = os.path.join(data_dir, "memory.db")
+
+        self._db_path = db_path
+        self._init_db()
+
+    def _init_db(self):
+        """데이터베이스 스키마 초기화"""
+        with sqlite3.connect(self._db_path) as conn:
+            cursor = conn.cursor()
+
+            # 에이전트 테이블
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS agents (
+                    agent_id TEXT PRIMARY KEY,
+                    workflow_id TEXT UNIQUE NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    metadata TEXT
+                )
+            """)
+
+            # 메모리 블록 테이블 (현재 값)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS memory_blocks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    agent_id TEXT NOT NULL,
+                    label TEXT NOT NULL,
+                    value TEXT NOT NULL,
+                    description TEXT,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(agent_id, label),
+                    FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
+                )
+            """)
+
+            # 메모리 히스토리 테이블 (버전 관리)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS memory_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    agent_id TEXT NOT NULL,
+                    label TEXT NOT NULL,
+                    value TEXT NOT NULL,
+                    version INTEGER NOT NULL,
+                    created_at TEXT NOT NULL,
+                    change_reason TEXT,
+                    FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
+                )
+            """)
+
+            # 인덱스 생성
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_memory_blocks_agent
+                ON memory_blocks(agent_id)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_memory_history_agent_label
+                ON memory_history(agent_id, label)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_memory_history_created
+                ON memory_history(created_at)
+            """)
+
+            conn.commit()
+
+    def create_agent(self, agent_id: str, workflow_id: str, metadata: Optional[Dict] = None) -> bool:
+        """에이전트 생성"""
+        now = datetime.now().isoformat()
+        try:
+            with sqlite3.connect(self._db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """INSERT OR REPLACE INTO agents (agent_id, workflow_id, created_at, updated_at, metadata)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (agent_id, workflow_id, now, now, json.dumps(metadata or {}))
+                )
+                conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"에이전트 생성 실패: {e}")
+            return False
+
+    def get_agent_id(self, workflow_id: str) -> Optional[str]:
+        """워크플로우 ID로 에이전트 ID 조회"""
+        try:
+            with sqlite3.connect(self._db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT agent_id FROM agents WHERE workflow_id = ?",
+                    (workflow_id,)
+                )
+                row = cursor.fetchone()
+                return row[0] if row else None
+        except Exception as e:
+            logger.error(f"에이전트 조회 실패: {e}")
+            return None
+
+    def set_block(self, agent_id: str, label: str, value: str,
+                  description: Optional[str] = None, change_reason: Optional[str] = None) -> bool:
+        """메모리 블록 저장 (히스토리 자동 기록)"""
+        now = datetime.now().isoformat()
+        try:
+            with sqlite3.connect(self._db_path) as conn:
+                cursor = conn.cursor()
+
+                # 현재 버전 조회
+                cursor.execute(
+                    "SELECT MAX(version) FROM memory_history WHERE agent_id = ? AND label = ?",
+                    (agent_id, label)
+                )
+                row = cursor.fetchone()
+                new_version = (row[0] or 0) + 1
+
+                # 현재 값 업데이트/삽입
+                cursor.execute(
+                    """INSERT OR REPLACE INTO memory_blocks
+                       (agent_id, label, value, description, updated_at)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (agent_id, label, value, description, now)
+                )
+
+                # 히스토리에 기록
+                cursor.execute(
+                    """INSERT INTO memory_history
+                       (agent_id, label, value, version, created_at, change_reason)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (agent_id, label, value, new_version, now, change_reason)
+                )
+
+                # 에이전트 updated_at 갱신
+                cursor.execute(
+                    "UPDATE agents SET updated_at = ? WHERE agent_id = ?",
+                    (now, agent_id)
+                )
+
+                conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"블록 저장 실패: {e}")
+            return False
+
+    def get_block(self, agent_id: str, label: str) -> Optional[str]:
+        """메모리 블록 조회"""
+        try:
+            with sqlite3.connect(self._db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT value FROM memory_blocks WHERE agent_id = ? AND label = ?",
+                    (agent_id, label)
+                )
+                row = cursor.fetchone()
+                return row[0] if row else None
+        except Exception as e:
+            logger.error(f"블록 조회 실패: {e}")
+            return None
+
+    def get_all_blocks(self, agent_id: str) -> Dict[str, str]:
+        """모든 메모리 블록 조회"""
+        try:
+            with sqlite3.connect(self._db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT label, value FROM memory_blocks WHERE agent_id = ?",
+                    (agent_id,)
+                )
+                return {row[0]: row[1] for row in cursor.fetchall()}
+        except Exception as e:
+            logger.error(f"블록 전체 조회 실패: {e}")
+            return {}
+
+    def get_block_history(self, agent_id: str, label: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """메모리 블록 히스토리 조회"""
+        try:
+            with sqlite3.connect(self._db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """SELECT version, value, created_at, change_reason
+                       FROM memory_history
+                       WHERE agent_id = ? AND label = ?
+                       ORDER BY version DESC
+                       LIMIT ?""",
+                    (agent_id, label, limit)
+                )
+                return [
+                    {
+                        "version": row[0],
+                        "value": row[1],
+                        "created_at": row[2],
+                        "change_reason": row[3],
+                    }
+                    for row in cursor.fetchall()
+                ]
+        except Exception as e:
+            logger.error(f"히스토리 조회 실패: {e}")
+            return []
+
+    def get_block_at_version(self, agent_id: str, label: str, version: int) -> Optional[str]:
+        """특정 버전의 메모리 블록 조회"""
+        try:
+            with sqlite3.connect(self._db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """SELECT value FROM memory_history
+                       WHERE agent_id = ? AND label = ? AND version = ?""",
+                    (agent_id, label, version)
+                )
+                row = cursor.fetchone()
+                return row[0] if row else None
+        except Exception as e:
+            logger.error(f"버전 조회 실패: {e}")
+            return None
+
+    def rollback_block(self, agent_id: str, label: str, version: int) -> bool:
+        """특정 버전으로 롤백"""
+        old_value = self.get_block_at_version(agent_id, label, version)
+        if old_value is None:
+            return False
+        return self.set_block(agent_id, label, old_value, change_reason=f"Rollback to version {version}")
+
+    def search_history(self, agent_id: str, query: str, limit: int = 20) -> List[Dict[str, Any]]:
+        """히스토리에서 검색"""
+        try:
+            with sqlite3.connect(self._db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """SELECT label, version, value, created_at
+                       FROM memory_history
+                       WHERE agent_id = ? AND value LIKE ?
+                       ORDER BY created_at DESC
+                       LIMIT ?""",
+                    (agent_id, f"%{query}%", limit)
+                )
+                return [
+                    {
+                        "label": row[0],
+                        "version": row[1],
+                        "value": row[2],
+                        "created_at": row[3],
+                    }
+                    for row in cursor.fetchall()
+                ]
+        except Exception as e:
+            logger.error(f"검색 실패: {e}")
+            return []
+
+    def delete_agent(self, agent_id: str) -> bool:
+        """에이전트 및 관련 데이터 삭제"""
+        try:
+            with sqlite3.connect(self._db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM memory_history WHERE agent_id = ?", (agent_id,))
+                cursor.execute("DELETE FROM memory_blocks WHERE agent_id = ?", (agent_id,))
+                cursor.execute("DELETE FROM agents WHERE agent_id = ?", (agent_id,))
+                conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"에이전트 삭제 실패: {e}")
+            return False
+
+    def get_stats(self, agent_id: str) -> Dict[str, Any]:
+        """에이전트 통계 조회"""
+        try:
+            with sqlite3.connect(self._db_path) as conn:
+                cursor = conn.cursor()
+
+                # 블록 수
+                cursor.execute(
+                    "SELECT COUNT(*) FROM memory_blocks WHERE agent_id = ?",
+                    (agent_id,)
+                )
+                block_count = cursor.fetchone()[0]
+
+                # 히스토리 수
+                cursor.execute(
+                    "SELECT COUNT(*) FROM memory_history WHERE agent_id = ?",
+                    (agent_id,)
+                )
+                history_count = cursor.fetchone()[0]
+
+                # 에이전트 정보
+                cursor.execute(
+                    "SELECT created_at, updated_at FROM agents WHERE agent_id = ?",
+                    (agent_id,)
+                )
+                agent_row = cursor.fetchone()
+
+                return {
+                    "block_count": block_count,
+                    "history_count": history_count,
+                    "created_at": agent_row[0] if agent_row else None,
+                    "updated_at": agent_row[1] if agent_row else None,
+                }
+        except Exception as e:
+            logger.error(f"통계 조회 실패: {e}")
+            return {}
+
+
 class LettaMemoryService:
     """
     Letta 메모리 서비스
 
     워크플로우 에이전트의 메모리를 Letta를 통해 관리합니다.
-    Letta 서버가 없으면 로컬 폴백 모드로 동작합니다.
+    Letta 서버가 없으면 SQLite 기반 로컬 폴백 모드로 동작합니다.
     """
 
     def __init__(
         self,
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
+        db_path: Optional[str] = None,
     ):
         """
         Args:
             api_key: Letta API 키 (없으면 환경변수에서 읽음)
             base_url: Letta 서버 URL (셀프호스팅 시 사용)
+            db_path: SQLite 데이터베이스 경로 (폴백 모드용)
         """
         self._api_key = api_key or os.getenv("LETTA_API_KEY")
         self._base_url = base_url or os.getenv("LETTA_BASE_URL", "http://localhost:8283")
         self._client = None
         self._agents: Dict[str, str] = {}  # workflow_id -> agent_id
         self._fallback_mode = False
-        self._fallback_memory: Dict[str, Dict[str, str]] = {}  # 로컬 폴백 메모리
-        self._load_fallback_memory()
+
+        # SQLite 저장소 (폴백 + 영구 저장)
+        self._sqlite_store = SQLiteMemoryStore(db_path)
+
+        # 기존 에이전트 로드
+        self._load_existing_agents()
 
         self._initialize_client()
+
+    def _load_existing_agents(self):
+        """SQLite에서 기존 에이전트 로드"""
+        try:
+            with sqlite3.connect(self._sqlite_store._db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT workflow_id, agent_id FROM agents")
+                for row in cursor.fetchall():
+                    self._agents[row[0]] = row[1]
+            logger.info(f"기존 에이전트 {len(self._agents)}개 로드됨")
+        except Exception as e:
+            logger.warning(f"에이전트 로드 실패: {e}")
 
     def _initialize_client(self):
         """Letta 클라이언트 초기화"""
@@ -169,37 +505,12 @@ class LettaMemoryService:
             logger.info(f"Letta 클라이언트 초기화 완료: {self._base_url}")
 
         except ImportError:
-            logger.warning("letta-client 패키지가 설치되지 않음. 폴백 모드 사용.")
+            logger.warning("letta-client 패키지가 설치되지 않음. SQLite 폴백 모드 사용.")
             self._fallback_mode = True
 
         except Exception as e:
-            logger.warning(f"Letta 서버 연결 실패: {e}. 폴백 모드 사용.")
+            logger.warning(f"Letta 서버 연결 실패: {e}. SQLite 폴백 모드 사용.")
             self._fallback_mode = True
-
-    def _get_memory_file(self) -> str:
-        data_dir = os.path.join(os.path.expanduser("~"), ".cua2")
-        os.makedirs(data_dir, exist_ok=True)
-        return os.path.join(data_dir, "memory.json")
-
-    def _load_fallback_memory(self):
-        """메모리 파일 로드"""
-        try:
-            import json
-            file_path = self._get_memory_file()
-            if os.path.exists(file_path):
-                with open(file_path, "r", encoding="utf-8") as f:
-                    self._fallback_memory = json.load(f)
-        except Exception as e:
-            logger.warning(f"메모리 로드 실패: {e}")
-
-    def _save_fallback_memory(self):
-        """메모리 파일 저장"""
-        try:
-            import json
-            with open(self._get_memory_file(), "w", encoding="utf-8") as f:
-                json.dump(self._fallback_memory, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            logger.warning(f"메모리 저장 실패: {e}")
 
     async def create_workflow_agent(
         self,
@@ -253,17 +564,35 @@ class LettaMemoryService:
             return self._create_fallback_agent(config)
 
     def _create_fallback_agent(self, config: WorkflowMemoryConfig) -> str:
-        """폴백 모드에서 로컬 메모리로 에이전트 생성"""
-        agent_id = f"fallback-{config.workflow_id}"
-        # 이미 로드된 메모리가 있으면 유지
-        if agent_id not in self._fallback_memory:
-            self._fallback_memory[agent_id] = {
-                block.label: block.value for block in config.initial_blocks
-            }
-            self._save_fallback_memory()
+        """폴백 모드에서 SQLite로 에이전트 생성"""
+        agent_id = f"sqlite-{config.workflow_id}"
+
+        # SQLite에 에이전트 생성
+        existing_id = self._sqlite_store.get_agent_id(config.workflow_id)
+        if existing_id:
+            # 기존 에이전트 사용
+            agent_id = existing_id
+            logger.info(f"기존 SQLite 에이전트 재사용: {agent_id}")
+        else:
+            # 새 에이전트 생성
+            self._sqlite_store.create_agent(
+                agent_id=agent_id,
+                workflow_id=config.workflow_id,
+                metadata={"workflow_name": config.workflow_name}
+            )
+
+            # 초기 메모리 블록 저장
+            for block in config.initial_blocks:
+                self._sqlite_store.set_block(
+                    agent_id=agent_id,
+                    label=block.label,
+                    value=block.value,
+                    description=block.description,
+                    change_reason="Initial creation"
+                )
+            logger.info(f"SQLite 에이전트 생성: {agent_id}")
 
         self._agents[config.workflow_id] = agent_id
-        logger.info(f"폴백 에이전트 생성: {agent_id}")
         return agent_id
 
     def _get_system_prompt(self, config: WorkflowMemoryConfig) -> str:
@@ -305,8 +634,8 @@ Always keep your memory up-to-date so you can resume work efficiently.
         if not agent_id:
             return None
 
-        if self._fallback_mode or agent_id.startswith("fallback-"):
-            return self._fallback_memory.get(agent_id, {}).get(block_label)
+        if self._fallback_mode or agent_id.startswith("sqlite-"):
+            return self._sqlite_store.get_block(agent_id, block_label)
 
         try:
             block = self._client.agents.blocks.retrieve(
@@ -323,6 +652,7 @@ Always keep your memory up-to-date so you can resume work efficiently.
         workflow_id: str,
         block_label: str,
         value: str,
+        change_reason: Optional[str] = None,
     ) -> bool:
         """
         메모리 블록 업데이트
@@ -331,6 +661,7 @@ Always keep your memory up-to-date so you can resume work efficiently.
             workflow_id: 워크플로우 ID
             block_label: 블록 레이블
             value: 새 값
+            change_reason: 변경 이유 (히스토리 기록용)
 
         Returns:
             성공 여부
@@ -339,18 +670,26 @@ Always keep your memory up-to-date so you can resume work efficiently.
         if not agent_id:
             return False
 
-        if self._fallback_mode or agent_id.startswith("fallback-"):
-            if agent_id in self._fallback_memory:
-                self._fallback_memory[agent_id][block_label] = value
-                self._save_fallback_memory()
-                return True
-            return False
+        if self._fallback_mode or agent_id.startswith("sqlite-"):
+            return self._sqlite_store.set_block(
+                agent_id=agent_id,
+                label=block_label,
+                value=value,
+                change_reason=change_reason
+            )
 
         try:
             self._client.agents.blocks.update(
                 agent_id=agent_id,
                 block_label=block_label,
                 value=value,
+            )
+            # Letta 모드에서도 SQLite에 백업 저장
+            self._sqlite_store.set_block(
+                agent_id=agent_id,
+                label=block_label,
+                value=value,
+                change_reason=change_reason
             )
             return True
         except Exception as e:
@@ -371,8 +710,8 @@ Always keep your memory up-to-date so you can resume work efficiently.
         if not agent_id:
             return {}
 
-        if self._fallback_mode or agent_id.startswith("fallback-"):
-            return self._fallback_memory.get(agent_id, {}).copy()
+        if self._fallback_mode or agent_id.startswith("sqlite-"):
+            return self._sqlite_store.get_all_blocks(agent_id)
 
         try:
             blocks = self._client.agents.blocks.list(agent_id=agent_id)
@@ -579,21 +918,136 @@ Always keep your memory up-to-date so you can resume work efficiently.
 
         return "\n\n".join(context_parts)
 
-    async def cleanup_agent(self, workflow_id: str):
-        """에이전트 정리"""
+    async def cleanup_agent(self, workflow_id: str, delete_data: bool = False):
+        """
+        에이전트 정리
+
+        Args:
+            workflow_id: 워크플로우 ID
+            delete_data: True면 SQLite 데이터도 삭제
+        """
         agent_id = self._agents.pop(workflow_id, None)
         if not agent_id:
             return
 
-        if self._fallback_mode or agent_id.startswith("fallback-"):
-            self._fallback_memory.pop(agent_id, None)
+        if self._fallback_mode or agent_id.startswith("sqlite-"):
+            if delete_data:
+                self._sqlite_store.delete_agent(agent_id)
+                logger.info(f"SQLite 에이전트 삭제: {agent_id}")
             return
 
         try:
             self._client.agents.delete(agent_id=agent_id)
+            if delete_data:
+                self._sqlite_store.delete_agent(agent_id)
             logger.info(f"Letta 에이전트 삭제: {agent_id}")
         except Exception as e:
             logger.error(f"에이전트 삭제 실패: {e}")
+
+    # === SQLite 전용 히스토리/버전 관리 메서드 ===
+
+    async def get_block_history(
+        self,
+        workflow_id: str,
+        block_label: str,
+        limit: int = 10,
+    ) -> List[Dict[str, Any]]:
+        """
+        메모리 블록 히스토리 조회
+
+        Args:
+            workflow_id: 워크플로우 ID
+            block_label: 블록 레이블
+            limit: 최대 조회 수
+
+        Returns:
+            히스토리 리스트 (최신순)
+        """
+        agent_id = self._agents.get(workflow_id)
+        if not agent_id:
+            return []
+        return self._sqlite_store.get_block_history(agent_id, block_label, limit)
+
+    async def get_block_at_version(
+        self,
+        workflow_id: str,
+        block_label: str,
+        version: int,
+    ) -> Optional[str]:
+        """
+        특정 버전의 메모리 블록 조회
+
+        Args:
+            workflow_id: 워크플로우 ID
+            block_label: 블록 레이블
+            version: 버전 번호
+
+        Returns:
+            블록 값 (없으면 None)
+        """
+        agent_id = self._agents.get(workflow_id)
+        if not agent_id:
+            return None
+        return self._sqlite_store.get_block_at_version(agent_id, block_label, version)
+
+    async def rollback_block(
+        self,
+        workflow_id: str,
+        block_label: str,
+        version: int,
+    ) -> bool:
+        """
+        특정 버전으로 롤백
+
+        Args:
+            workflow_id: 워크플로우 ID
+            block_label: 블록 레이블
+            version: 롤백할 버전 번호
+
+        Returns:
+            성공 여부
+        """
+        agent_id = self._agents.get(workflow_id)
+        if not agent_id:
+            return False
+        return self._sqlite_store.rollback_block(agent_id, block_label, version)
+
+    async def search_memory_history(
+        self,
+        workflow_id: str,
+        query: str,
+        limit: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """
+        메모리 히스토리 검색
+
+        Args:
+            workflow_id: 워크플로우 ID
+            query: 검색어
+            limit: 최대 조회 수
+
+        Returns:
+            검색 결과 리스트
+        """
+        agent_id = self._agents.get(workflow_id)
+        if not agent_id:
+            return []
+        return self._sqlite_store.search_history(agent_id, query, limit)
+
+    async def get_memory_stats(self, workflow_id: str) -> Dict[str, Any]:
+        """
+        메모리 통계 조회
+
+        Args:
+            workflow_id: 워크플로우 ID
+
+        Returns:
+            통계 딕셔너리
+        """
+        agent_id = self._agents.get(workflow_id)
+        if not agent_id:
+            return {}
+        return self._sqlite_store.get_stats(agent_id)
 
 
 # 싱글톤 인스턴스

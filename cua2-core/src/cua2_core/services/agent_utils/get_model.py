@@ -18,14 +18,22 @@ AVAILABLE_MODELS = [
 LOCAL_API_BASE = os.getenv("LOCAL_LLM_API_BASE", "http://localhost:8080/v1")
 
 
-def get_model(model_id: str) -> Model:
-    """Get the model"""
+def get_model(model_id: str, max_tokens: int = 1024) -> Model:
+    """
+    Get the model with optimized settings for faster inference.
+
+    Args:
+        model_id: 모델 ID
+        max_tokens: 최대 출력 토큰 수 (기본값: 1024, 장황한 출력 방지)
+    """
     # 로컬 모드면 무조건 로컬 모델 사용
     if USE_LOCAL or model_id == "local-qwen3-vl":
         return LiteLLMModel(
             model_id="openai/qwen3-vl",
             api_base=LOCAL_API_BASE,
             api_key="none",
+            max_tokens=max_tokens,  # 출력 토큰 제한
+            temperature=0.1,  # 낮은 temperature로 결정적이고 빠른 출력
         )
     else:
         # HuggingFace Inference API

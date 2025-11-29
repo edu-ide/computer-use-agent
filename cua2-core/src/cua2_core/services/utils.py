@@ -6,7 +6,7 @@ from PIL import Image
 
 
 def compress_image_to_max_size(
-    image: Image.Image, max_size_kb: int = 800
+    image: Image.Image, max_size_kb: int = 300
 ) -> Image.Image:
     """
     Compress an image to ensure it doesn't exceed max_size_kb.

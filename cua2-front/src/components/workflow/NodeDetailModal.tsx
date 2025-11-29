@@ -35,7 +35,9 @@ import {
   FiShoppingBag,
   FiDownload,
   FiCpu,
+  FiSettings,
 } from 'react-icons/fi';
+import ReactJson from 'react-json-view';
 import { getApiBaseUrl } from '@/config/api';
 
 interface NodeLog {
@@ -74,6 +76,7 @@ interface NodeDetailModalProps {
   nodeName?: string;
   nodeType?: 'start' | 'process' | 'condition' | 'end' | 'error' | 'vlm';
   instruction?: string; // VLM 에이전트 명령 (시스템 프롬프트)
+  metadata?: Record<string, any>; // Add metadata prop
 }
 
 const NodeDetailModal: React.FC<NodeDetailModalProps> = ({
@@ -84,6 +87,7 @@ const NodeDetailModal: React.FC<NodeDetailModalProps> = ({
   nodeName,
   nodeType,
   instruction,
+  metadata,
 }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -115,11 +119,6 @@ const NodeDetailModal: React.FC<NodeDetailModalProps> = ({
       }
 
       const data = await response.json();
-      console.log('[NodeDetailModal] API 응답:', data);
-      console.log('[NodeDetailModal] logs:', data.logs);
-      if (data.logs?.length > 0) {
-        console.log('[NodeDetailModal] 첫번째 로그:', data.logs[0]);
-      }
       setLogs(data.logs || []);
       setStatus(data.status);
       setNodeError(data.error);
@@ -210,8 +209,8 @@ const NodeDetailModal: React.FC<NodeDetailModalProps> = ({
               background: status === 'success'
                 ? '#22c55e'
                 : status === 'failed'
-                ? '#ef4444'
-                : 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+                  ? '#ef4444'
+                  : 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -283,6 +282,35 @@ const NodeDetailModal: React.FC<NodeDetailModalProps> = ({
               <Alert severity="error" sx={{ mb: 3 }}>
                 {nodeError}
               </Alert>
+            )}
+
+            {/* Node Configuration (Props) Section - NEW */}
+            {metadata && Object.keys(metadata).length > 0 && (
+              <Card
+                sx={{
+                  backgroundColor: '#f8fafc',
+                  border: '1px solid #e2e8f0',
+                  mb: 3,
+                }}
+              >
+                <CardContent>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
+                    <FiSettings size={16} color="#475569" />
+                    <Typography variant="subtitle2" sx={{ color: '#334155', fontWeight: 700 }}>
+                      노드 설정 (Props)
+                    </Typography>
+                  </Box>
+                  <Box sx={{ p: 1, bgcolor: '#fff', borderRadius: 1, border: '1px solid #e2e8f0' }}>
+                    <ReactJson
+                      src={metadata}
+                      name={false}
+                      displayDataTypes={false}
+                      enableClipboard={true}
+                      collapsed={1}
+                    />
+                  </Box>
+                </CardContent>
+              </Card>
             )}
 
             {/* VLM 노드의 시스템 프롬프트/명령 표시 */}
@@ -672,12 +700,12 @@ const NodeDetailModal: React.FC<NodeDetailModalProps> = ({
                                 <Typography variant="caption" sx={{ color: '#7c3aed', fontWeight: 700 }}>
                                   Orchestrator 개입
                                 </Typography>
-                                <Chip 
+                                <Chip
                                   label={log.orchestrator_feedback.action}
                                   size="small"
-                                  sx={{ 
-                                    height: 20, 
-                                    fontSize: '10px', 
+                                  sx={{
+                                    height: 20,
+                                    fontSize: '10px',
                                     bgcolor: log.orchestrator_feedback.action === 'continue' ? '#ddd6fe' : '#fecaca',
                                     color: log.orchestrator_feedback.action === 'continue' ? '#7c3aed' : '#dc2626'
                                   }}

@@ -503,6 +503,9 @@ class AgentService:
                         inputTokensUsed=memory_step.token_usage.input_tokens,
                         outputTokensUsed=memory_step.token_usage.output_tokens,
                         step_evaluation="neutral",
+                        # 에이전트/모델 정보
+                        agentType="VLMAgent",
+                        modelId=self.active_tasks[message_id].model_id,
                     )
 
                     # Schedule async operations in the event loop (callback runs in worker thread)

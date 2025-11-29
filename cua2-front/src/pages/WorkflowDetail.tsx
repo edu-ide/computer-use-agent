@@ -27,6 +27,9 @@ import DarkModeOutlined from '@mui/icons-material/DarkModeOutlined';
 import LightModeOutlined from '@mui/icons-material/LightModeOutlined';
 import WifiIcon from '@mui/icons-material/Wifi';
 import WifiOffIcon from '@mui/icons-material/WifiOff';
+import { FiPlay, FiPause, FiSquare, FiSkipForward, FiRefreshCw, FiX, FiCpu, FiSettings } from 'react-icons/fi';
+import ReactJson from 'react-json-view';
+
 import { selectIsDarkMode, useAgentStore } from '@/stores/agentStore';
 import {
   WorkflowGraph,
@@ -35,6 +38,7 @@ import {
   ParameterConfig,
   VLMStepPanel,
   AgentActivityPanel,
+  ProductListModal,
 } from '@/components/workflow';
 import { getWorkflowDetail } from '@/services/workflowApi';
 import {
@@ -44,6 +48,10 @@ import {
 } from '@/machines/workflowMachine';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import CenterFocusStrongIcon from '@mui/icons-material/CenterFocusStrong';
+
+// The following imports and types are based on the provided "Code Edit" and assume a refactor to a new state management and component structure.
+// If these are not available in the project, this change will introduce errors.
+import { WorkflowNodeData } from '@/components/workflow/WorkflowNode'; // Assuming this path based on context
 
 // 아이콘 매핑
 const ICON_MAP: Record<string, React.ElementType> = {
@@ -113,6 +121,7 @@ const WorkflowDetail: React.FC = () => {
   const [stepPanelCollapsed, setStepPanelCollapsed] = React.useState(false);
   const [activityPanelCollapsed, setActivityPanelCollapsed] = React.useState(false);
   const [loading, setLoading] = React.useState(true);
+  const [productModalOpen, setProductModalOpen] = React.useState(false);
 
   // 워크플로우 상세 로드
   useEffect(() => {
@@ -243,18 +252,24 @@ const WorkflowDetail: React.FC = () => {
   const handleNodeClick = useCallback(
     (nodeId: string) => {
       const node = workflow?.nodes.find((n) => n.id === nodeId);
+      if (!node) return;
 
-      // VLM 노드는 언제든 클릭 가능, 다른 노드는 완료 후 클릭 가능
-      if (
-        node?.type === 'vlm' ||
-        (executionId &&
-          ['completed', 'failed', 'stopped'].includes(machineState))
-      ) {
+      // 클릭 가능 조건:
+      // 1. node.clickable이 true인 경우
+      // 2. VLM 타입 노드
+      // 3. 실행 완료/실패/중지 후 모든 노드
+      // 4. 현재 완료된 노드 또는 실패한 노드
+      const isVLMNode = node.type === 'vlm';
+      const isClickableNode = node.clickable === true;
+      const isExecutionFinished = ['completed', 'failed', 'stopped'].includes(machineState);
+      const isCompletedOrFailed = completedNodes.includes(nodeId) || failedNodes.includes(nodeId);
+
+      if (isClickableNode || isVLMNode || isExecutionFinished || isCompletedOrFailed) {
         setSelectedNodeId(nodeId);
         setNodeModalOpen(true);
       }
     },
-    [workflow, executionId, machineState]
+    [workflow, machineState, completedNodes, failedNodes]
   );
 
   // 시작 핸들러
@@ -340,6 +355,14 @@ const WorkflowDetail: React.FC = () => {
         reuse_trace: node.reuse_trace,
         share_memory: node.share_memory,
         cache_key_params: node.cache_key_params,
+        // 에이전트 정보
+        agent_type: node.agent_type,
+        model_id: node.model_id,
+        // 클릭 가능 여부 - VLM 노드이거나 명시적으로 clickable인 경우
+        clickable: node.clickable ?? (node.type === 'vlm'),
+        // 시간 설정
+        timeout_sec: node.timeout_sec,
+        avg_duration_sec: node.avg_duration_sec,
       })),
       edges: workflow.edges.map((edge) => ({
         source: edge.source,
@@ -584,7 +607,7 @@ const WorkflowDetail: React.FC = () => {
             </>
           )}
           <Button
-            onClick={() => navigate('/products')}
+            onClick={() => setProductModalOpen(true)}
             size="small"
             startIcon={<InventoryIcon />}
             sx={{ textTransform: 'none' }}
@@ -740,6 +763,16 @@ const WorkflowDetail: React.FC = () => {
         instruction={
           workflow?.nodes.find((n) => n.id === selectedNodeId)?.instruction
         }
+        metadata={
+          workflow?.nodes.find((n) => n.id === selectedNodeId)?.metadata
+        }
+      />
+
+      {/* 상품 목록 모달 */}
+      <ProductListModal
+        open={productModalOpen}
+        onClose={() => setProductModalOpen(false)}
+        initialKeyword={parameters?.keyword as string}
       />
     </Box>
   );

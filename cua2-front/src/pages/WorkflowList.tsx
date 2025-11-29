@@ -18,7 +18,9 @@ import {
   Container,
   AppBar,
   Toolbar,
+  Button,
 } from '@mui/material';
+import { FiPackage } from 'react-icons/fi';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
 import YouTubeIcon from '@mui/icons-material/YouTube';
@@ -88,6 +90,14 @@ const WorkflowList: React.FC = () => {
           <Typography variant="h6" sx={{ flexGrow: 1, fontWeight: 600 }}>
             워크플로우
           </Typography>
+          <Button
+            color="inherit"
+            startIcon={<FiPackage />}
+            onClick={() => navigate('/library')}
+            sx={{ mr: 1 }}
+          >
+            Library
+          </Button>
           <IconButton onClick={toggleDarkMode}>
             {isDarkMode ? <LightModeOutlined /> : <DarkModeOutlined />}
           </IconButton>

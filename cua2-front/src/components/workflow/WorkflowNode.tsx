@@ -11,15 +11,12 @@ import {
   FiPlay,
   FiCheck,
   FiX,
-  FiSearch,
   FiEye,
-  FiArrowRight,
   FiFlag,
   FiAlertTriangle,
   FiMonitor,
   FiCpu,
   FiZap,
-  FiRefreshCw,
   FiLink,
   FiClock,
 } from 'react-icons/fi';
@@ -80,6 +77,11 @@ export interface WorkflowNodeData {
   reuseTrace?: boolean;  // 이전 trace 재사용 여부
   shareMemory?: boolean;  // 메모리 공유 여부
   cacheKeyParams?: string[];  // 캐시 키 파라미터
+  // 에이전트 정보
+  agentType?: string;  // 에이전트 타입 (VLMAgent, SearchAgent, AnalysisAgent 등)
+  modelId?: string;  // 모델 ID (local-qwen3-vl, gpt-4o 등)
+  // 클릭 가능 여부 강제 설정
+  clickable?: boolean;  // true면 항상 클릭 가능
 }
 
 // 노드 타입별 설정
@@ -139,11 +141,11 @@ const WorkflowNode = memo(({ data, selected }: NodeProps<WorkflowNodeData>) => {
   const isSuccess = data.status === 'success';
   const isFailed = data.status === 'failed';
   const isVLM = nodeType === 'vlm';
-  // VLM 노드는 항상 클릭 가능 (상세정보 보기), 다른 노드는 성공/실패 시에만 클릭 가능
-  const isClickable = data.onClick && (isVLM || isSuccess || isFailed);
+  // clickable이 true이거나, VLM 노드이거나, 성공/실패 시 클릭 가능
+  const isClickable = data.onClick && (data.clickable || isVLM || isSuccess || isFailed);
 
   const handleClick = () => {
-    if (data.onClick && (isVLM || isSuccess || isFailed)) {
+    if (data.onClick && (data.clickable || isVLM || isSuccess || isFailed)) {
       data.onClick();
     }
   };
@@ -194,10 +196,10 @@ const WorkflowNode = memo(({ data, selected }: NodeProps<WorkflowNodeData>) => {
           background: isSuccess
             ? '#22c55e'
             : isFailed
-            ? '#ef4444'
-            : isRunning
-            ? `linear-gradient(90deg, #3b82f6, #8b5cf6, #3b82f6)`
-            : typeConfig.gradient,
+              ? '#ef4444'
+              : isRunning
+                ? `linear-gradient(90deg, #3b82f6, #8b5cf6, #3b82f6)`
+                : typeConfig.gradient,
           backgroundSize: isRunning ? '200% 200%' : 'auto',
           animation: isRunning ? `${gradientFlow} 1.5s ease infinite` : 'none',
         }}
@@ -216,8 +218,8 @@ const WorkflowNode = memo(({ data, selected }: NodeProps<WorkflowNodeData>) => {
               background: isSuccess
                 ? '#22c55e'
                 : isFailed
-                ? '#ef4444'
-                : typeConfig.gradient,
+                  ? '#ef4444'
+                  : typeConfig.gradient,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -260,38 +262,75 @@ const WorkflowNode = memo(({ data, selected }: NodeProps<WorkflowNodeData>) => {
             </Typography>
 
             {/* 상태 뱃지 */}
-            <Chip
-              size="small"
-              label={
-                isRunning ? '실행 중' :
-                isSuccess ? '완료' :
-                isFailed ? '실패' :
-                data.status === 'skipped' ? '건너뜀' : '대기'
-              }
-              sx={{
-                height: 20,
-                fontSize: '10px',
-                fontWeight: 600,
-                backgroundColor: isRunning
-                  ? 'rgba(59, 130, 246, 0.1)'
-                  : isSuccess
-                  ? 'rgba(34, 197, 94, 0.1)'
-                  : isFailed
-                  ? 'rgba(239, 68, 68, 0.1)'
-                  : 'rgba(148, 163, 184, 0.1)',
-                color: isRunning
-                  ? '#3b82f6'
-                  : isSuccess
-                  ? '#22c55e'
-                  : isFailed
-                  ? '#ef4444'
-                  : '#64748b',
-                animation: isRunning ? `${pulse} 1.5s ease infinite` : 'none',
-                '& .MuiChip-label': {
-                  px: 1,
-                },
-              }}
-            />
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
+              <Chip
+                size="small"
+                label={
+                  isRunning ? '실행 중' :
+                    isSuccess ? '완료' :
+                      isFailed ? '실패' :
+                        data.status === 'skipped' ? '건너뜀' : '대기'
+                }
+                sx={{
+                  height: 20,
+                  fontSize: '10px',
+                  fontWeight: 600,
+                  backgroundColor: isRunning
+                    ? 'rgba(59, 130, 246, 0.1)'
+                    : isSuccess
+                      ? 'rgba(34, 197, 94, 0.1)'
+                      : isFailed
+                        ? 'rgba(239, 68, 68, 0.1)'
+                        : 'rgba(148, 163, 184, 0.1)',
+                  color: isRunning
+                    ? '#3b82f6'
+                    : isSuccess
+                      ? '#22c55e'
+                      : isFailed
+                        ? '#ef4444'
+                        : '#64748b',
+                  animation: isRunning ? `${pulse} 1.5s ease infinite` : 'none',
+                  '& .MuiChip-label': {
+                    px: 1,
+                  },
+                }}
+              />
+              {/* 에이전트 타입 뱃지 */}
+              {data.agentType && (
+                <Chip
+                  size="small"
+                  icon={<FiCpu size={10} />}
+                  label={data.agentType}
+                  sx={{
+                    height: 20,
+                    fontSize: '9px',
+                    fontWeight: 600,
+                    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+                    color: '#d97706',
+                    '& .MuiChip-icon': {
+                      color: '#d97706',
+                      ml: 0.5,
+                      mr: -0.5,
+                    },
+                    '& .MuiChip-label': {
+                      px: 0.5,
+                    },
+                  }}
+                />
+              )}
+            </Box>
+            {/* 모델 ID 표시 */}
+            {data.modelId && (
+              <Typography
+                sx={{
+                  fontSize: '10px',
+                  color: '#94a3b8',
+                  mt: 0.3,
+                }}
+              >
+                🤖 {data.modelId}
+              </Typography>
+            )}
           </Box>
         </Box>
 
@@ -458,8 +497,8 @@ const WorkflowNode = memo(({ data, selected }: NodeProps<WorkflowNodeData>) => {
           </Box>
         )}
 
-        {/* 재사용/메모리 설정 배지 */}
-        {(data.reusable || data.reuseTrace || data.shareMemory) && (
+        {/* 메모리 공유 배지 - shareMemory만 표시 (trace 재사용은 실제 동작 시에만 표시되어야 함) */}
+        {data.shareMemory && (
           <Box
             sx={{
               display: 'flex',
@@ -469,52 +508,27 @@ const WorkflowNode = memo(({ data, selected }: NodeProps<WorkflowNodeData>) => {
               flexWrap: 'wrap',
             }}
           >
-            {data.reuseTrace && (
-              <Chip
-                icon={<FiRefreshCw size={10} />}
-                label="Trace 재사용"
-                size="small"
-                title="이전 성공 trace를 재사용하여 빠르게 실행합니다"
-                sx={{
-                  height: 18,
-                  fontSize: '9px',
-                  fontWeight: 600,
-                  backgroundColor: '#dbeafe',
-                  color: '#1d4ed8',
-                  '& .MuiChip-icon': {
-                    color: '#1d4ed8',
-                    ml: 0.5,
-                    mr: -0.5,
-                  },
-                  '& .MuiChip-label': {
-                    px: 0.5,
-                  },
-                }}
-              />
-            )}
-            {data.shareMemory && (
-              <Chip
-                icon={<FiLink size={10} />}
-                label="메모리 공유"
-                size="small"
-                title="이전 노드와 컨텍스트를 공유합니다"
-                sx={{
-                  height: 18,
-                  fontSize: '9px',
-                  fontWeight: 600,
-                  backgroundColor: '#fef3c7',
+            <Chip
+              icon={<FiLink size={10} />}
+              label="메모리 공유"
+              size="small"
+              title="이전 노드와 컨텍스트를 공유합니다"
+              sx={{
+                height: 18,
+                fontSize: '9px',
+                fontWeight: 600,
+                backgroundColor: '#fef3c7',
+                color: '#92400e',
+                '& .MuiChip-icon': {
                   color: '#92400e',
-                  '& .MuiChip-icon': {
-                    color: '#92400e',
-                    ml: 0.5,
-                    mr: -0.5,
-                  },
-                  '& .MuiChip-label': {
-                    px: 0.5,
-                  },
-                }}
-              />
-            )}
+                  ml: 0.5,
+                  mr: -0.5,
+                },
+                '& .MuiChip-label': {
+                  px: 0.5,
+                },
+              }}
+            />
           </Box>
         )}
 

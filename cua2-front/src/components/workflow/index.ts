@@ -6,6 +6,7 @@ export { default as ParameterNode } from './ParameterNode';
 export { default as ParameterModal } from './ParameterModal';
 export { default as VLMStepPanel } from './VLMStepPanel';
 export { default as AgentActivityPanel } from './AgentActivityPanel';
+export { default as ProductListModal } from './ProductListModal';
 export type { WorkflowNodeData } from './WorkflowNode';
 export type { ParameterNodeData } from './ParameterNode';
 export type { WorkflowDefinition, ExecutionState, ParameterConfig } from './WorkflowGraph';

@@ -63,19 +63,73 @@ class LocalDesktop:
         """스크린샷 캡처 (Xvfb에서)"""
         import io
 
-        # import 명령으로 스크린샷 캡처
-        result = subprocess.run(
-            ["import", "-window", "root", "-display", self.display, "png:-"],
-            capture_output=True,
-            env=self._get_env()
-        )
+        env = self._get_env()
 
-        if result.returncode == 0 and len(result.stdout) > 1000:
-            return Image.open(io.BytesIO(result.stdout))
-        else:
-            # 실패시 빈 이미지 반환
-            print(f"스크린샷 캡처 실패: {result.stderr.decode()[:100]}")
-            return Image.new("RGB", (self.width, self.height), (0, 0, 0))
+        # 방법 1: xwd + convert (ImageMagick)
+        try:
+            # xwd로 캡처 후 convert로 PNG 변환
+            xwd_result = subprocess.run(
+                ["xwd", "-root", "-display", self.display],
+                capture_output=True,
+                env=env
+            )
+            if xwd_result.returncode == 0 and len(xwd_result.stdout) > 1000:
+                # convert가 있으면 사용
+                convert_result = subprocess.run(
+                    ["convert", "xwd:-", "png:-"],
+                    input=xwd_result.stdout,
+                    capture_output=True
+                )
+                if convert_result.returncode == 0:
+                    return Image.open(io.BytesIO(convert_result.stdout))
+        except FileNotFoundError:
+            pass
+
+        # 방법 2: import 명령 (ImageMagick)
+        try:
+            result = subprocess.run(
+                ["import", "-window", "root", "-display", self.display, "png:-"],
+                capture_output=True,
+                env=env
+            )
+            if result.returncode == 0 and len(result.stdout) > 1000:
+                return Image.open(io.BytesIO(result.stdout))
+        except FileNotFoundError:
+            pass
+
+        # 방법 3: scrot
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+                temp_path = f.name
+            subprocess.run(
+                ["scrot", "-d", "0", temp_path],
+                env=env,
+                check=True
+            )
+            img = Image.open(temp_path)
+            os.unlink(temp_path)
+            return img
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            pass
+
+        # 방법 4: gnome-screenshot
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+                temp_path = f.name
+            subprocess.run(
+                ["gnome-screenshot", "-f", temp_path],
+                env=env,
+                check=True
+            )
+            img = Image.open(temp_path)
+            os.unlink(temp_path)
+            return img
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            pass
+
+        # 모두 실패시 빈 이미지 반환
+        print("스크린샷 캡처 실패: 사용 가능한 도구 없음 (imagemagick, scrot, gnome-screenshot 중 하나 설치 필요)")
+        return Image.new("RGB", (self.width, self.height), (0, 0, 0))
 
     def _run_xdotool(self, *args):
         """xdotool 실행 (가상 디스플레이에서)"""
@@ -141,26 +195,173 @@ class LocalDesktop:
         self._run_xdotool("mousemove", str(end[0]), str(end[1]))
         self._run_xdotool("mouseup", "1")
 
-    def open(self, url: str, browser_type: str = "firefox"):
+    def _copy_chrome_profile(self):
+        """기존 Chrome 프로필을 복사하여 독립된 프로필 생성"""
+        import shutil
+
+        source_profile = os.path.expanduser("~/.config/google-chrome")
+        target_profile = os.path.join(self.base_profile_dir, f"chrome-{self.display_num}")
+
+        # 기존 복사본 삭제 (락 파일 문제 방지)
+        if os.path.exists(target_profile):
+            try:
+                shutil.rmtree(target_profile)
+            except Exception as e:
+                print(f"기존 프로필 삭제 실패: {e}")
+
+        # 필요한 파일만 복사 (쿠키, 로그인 상태 등)
+        os.makedirs(target_profile, exist_ok=True)
+
+        files_to_copy = [
+            "Default/Cookies",
+            "Default/Login Data",
+            "Default/Web Data",
+            "Default/Preferences",
+            "Default/Secure Preferences",
+            "Default/Local Storage",
+            "Default/Session Storage",
+            "Default/IndexedDB",
+            "Local State",
+        ]
+
+        for file_path in files_to_copy:
+            src = os.path.join(source_profile, file_path)
+            dst = os.path.join(target_profile, file_path)
+            if os.path.exists(src):
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                try:
+                    if os.path.isdir(src):
+                        shutil.copytree(src, dst)
+                    else:
+                        shutil.copy2(src, dst)
+                except Exception as e:
+                    print(f"파일 복사 실패 {file_path}: {e}")
+
+        return target_profile
+
+    def open(self, url: str, browser_type: str = "chrome"):
         """URL 열기 (가상 디스플레이에서 브라우저 실행)
 
         Args:
             url: 열 URL
-            browser_type: "firefox" (기본) 또는 "chromium"
+            browser_type: "chrome" (기본, 프로필 복사하여 독립 실행) 또는 "firefox"
         """
         env = self._get_env()
 
-        # 기존 브라우저 프로세스 종료
-        subprocess.run(["pkill", "-f", f"profile.*{self.display_num}"], capture_output=True)
-        subprocess.run(["pkill", "-f", f"firefox-{self.display_num}"], capture_output=True)
-        subprocess.run(["pkill", "-f", f"--user-data-dir={self.profile_dir}"], capture_output=True)
-        time.sleep(1.0)
+        # Chrome (프로필 복사하여 독립 인스턴스로 실행)
+        if browser_type == "chrome":
+            # 기존 프로필 복사
+            chrome_profile_dir = self._copy_chrome_profile()
+            print(f"Chrome 프로필 복사 완료: {chrome_profile_dir}")
 
-        # Firefox 우선 시도 (봇 감지에 더 유리)
+            for browser in ["google-chrome", "google-chrome-stable", "chromium-browser", "chromium"]:
+                try:
+                    self._browser_proc = subprocess.Popen(
+                        [
+                            browser,
+                            f"--user-data-dir={chrome_profile_dir}",
+                            "--profile-directory=Default",
+                            f"--window-size={self.width},{self.height}",
+                            "--no-first-run",
+                            "--no-default-browser-check",
+                            "--disable-background-networking",
+                            "--disable-sync",
+                            "--no-sandbox",
+                            "--disable-gpu",
+                            "--remote-debugging-port=9222",  # CDP 포트 활성화
+                            url
+                        ],
+                        env=env,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL
+                    )
+                    print(f"{browser} 시작 (Xvfb {self.display}, 독립 프로필, CDP:9222) -> {url}")
+                    self._browser_started = True
+                    time.sleep(5)
+                    return
+                except FileNotFoundError:
+                    continue
+
+            print("Chrome을 찾을 수 없음, Firefox로 시도...")
+            browser_type = "firefox"
+
+    def evaluate_script(self, script: str) -> str:
+        """
+        CDP를 사용하여 자바스크립트 실행
+        Args:
+            script: 실행할 자바스크립트 코드
+        Returns:
+            실행 결과 (문자열)
+        """
+        import requests
+        import json
+        from websockets.sync.client import connect
+
+        try:
+            # 1. CDP WebSocket URL 가져오기
+            response = requests.get("http://localhost:9222/json")
+            pages = response.json()
+            
+            # 'page' 타입의 탭 찾기
+            ws_url = None
+            for page in pages:
+                if page.get("type") == "page":
+                    ws_url = page.get("webSocketDebuggerUrl")
+                    break
+            
+            if not ws_url:
+                return "Error: No active page found for CDP"
+
+            # 2. WebSocket 연결 및 스크립트 실행
+            with connect(ws_url) as websocket:
+                # 초기 시도: 원본 스크립트 실행
+                # (IIFE나 표현식인 경우 그대로 실행됨)
+                message = {
+                    "id": 1,
+                    "method": "Runtime.evaluate",
+                    "params": {
+                        "expression": script,
+                        "returnByValue": True,
+                        "awaitPromise": True
+                    }
+                }
+                websocket.send(json.dumps(message))
+                
+                # 응답 수신
+                response = websocket.recv()
+                result = json.loads(response)
+                
+                # "Illegal return statement" 에러 발생 시 래핑하여 재시도
+                # (top-level return 문이 있는 경우)
+                if "exceptionDetails" in result["result"]:
+                    exception = result["result"]["exceptionDetails"]
+                    if exception.get("exception", {}).get("description", "").startswith("SyntaxError: Illegal return statement"):
+                        # 래핑하여 재시도
+                        wrapped_script = f"(async function() {{ {script} }})()"
+                        message["params"]["expression"] = wrapped_script
+                        message["id"] = 2
+                        websocket.send(json.dumps(message))
+                        
+                        response = websocket.recv()
+                        result = json.loads(response)
+
+                if "error" in result:
+                    return f"CDP Error: {result['error']['message']}"
+                
+                if "exceptionDetails" in result["result"]:
+                    return f"JS Exception: {result['result']['exceptionDetails']}"
+                
+                value = result["result"]["result"].get("value", "None")
+                if isinstance(value, (dict, list)):
+                    return json.dumps(value)
+                return str(value)
+
+        except Exception as e:
+            return f"Error executing script: {e}"
+
+        # Firefox (fallback)
         if browser_type == "firefox":
             import shutil
-            # 매번 새로운 프로필 생성 (기존 프로필 삭제)
-            # Snap 패키지 호환성을 위해 홈 디렉토리 사용
             firefox_profile = os.path.join(self.base_profile_dir, f"firefox-{self.display_num}")
             if os.path.exists(firefox_profile):
                 try:
@@ -174,7 +375,7 @@ class LocalDesktop:
                     [
                         "firefox",
                         "--new-instance",
-                        "--no-remote",  # 기존 Firefox 인스턴스와 분리
+                        "--no-remote",
                         "-profile", firefox_profile,
                         f"--width={self.width}",
                         f"--height={self.height}",
@@ -189,41 +390,7 @@ class LocalDesktop:
                 time.sleep(5)
                 return
             except FileNotFoundError:
-                print("Firefox를 찾을 수 없음, Chromium으로 시도...")
-
-        # Chromium (fallback 또는 명시적 요청)
-        # 프로필 디렉토리 초기화 (Lock 파일 문제 방지)
-        import shutil
-        if os.path.exists(self.profile_dir):
-            try:
-                shutil.rmtree(self.profile_dir)
-            except Exception as e:
-                print(f"Chromium 프로필 삭제 실패: {e}")
-        os.makedirs(self.profile_dir, exist_ok=True)
-
-        for browser in ["chromium-browser", "chromium", "google-chrome"]:
-            try:
-                self._browser_proc = subprocess.Popen(
-                    [
-                        browser,
-                        f"--user-data-dir={self.profile_dir}",
-                        f"--window-size={self.width},{self.height}",
-                        "--no-first-run",
-                        "--no-default-browser-check",
-                        "--no-sandbox",
-                        "--disable-dev-shm-usage",
-                        url
-                    ],
-                    env=env,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
-                print(f"{browser} 시작 (Xvfb {self.display}) -> {url}")
-                self._browser_started = True
-                time.sleep(5)
-                return
-            except FileNotFoundError:
-                continue
+                pass
 
         print("브라우저를 찾을 수 없습니다")
 

@@ -2,7 +2,7 @@ import asyncio
 import json
 import os
 from datetime import datetime
-from typing import Annotated, Literal, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional
 from uuid import uuid4
 
 from cua2_core.services.agent_utils.function_parser import FunctionCall
@@ -106,6 +106,10 @@ class AgentStep(BaseModel):
     error: Optional[str] = None
     thought: Optional[str] = None
     actions: list[AgentAction] = []
+    # 에이전트/모델 정보
+    agentType: Optional[str] = None  # "VLMAgent", "SearchAgent", "AnalysisAgent" 등
+    modelId: Optional[str] = None  # "local-qwen3-vl", "gpt-4o" 등
+    nodeName: Optional[str] = None  # 워크플로우 노드 이름
 
     @field_serializer("image")
     def serialize_image(self, image: str, _info):
@@ -220,6 +224,62 @@ class HeartbeatEvent(BaseModel):
     uuid: str = Field(default_factory=lambda: str(uuid4()))
 
 
+# =========================================
+# Human-in-the-Loop 이벤트
+# =========================================
+
+class ConfirmationRequiredEvent(BaseModel):
+    """사용자 확인 요청 이벤트"""
+
+    type: Literal["confirmation_required"] = "confirmation_required"
+    workflow_id: str
+    node_name: str
+    message: str
+    is_dangerous: bool = False
+    input_type: Optional[str] = None  # "text", "captcha", "2fa"
+
+
+class ConfirmationReceivedEvent(BaseModel):
+    """사용자 확인 완료 이벤트"""
+
+    type: Literal["confirmation_received"] = "confirmation_received"
+    workflow_id: str
+    node_name: str
+    confirmed: bool
+    user_input: Optional[str] = None
+
+
+class WorkflowStateUpdateEvent(BaseModel):
+    """워크플로우 상태 업데이트 이벤트"""
+
+    type: Literal["workflow_state_update"] = "workflow_state_update"
+    workflow_id: str
+    execution_id: str
+    status: str
+    current_node: Optional[str] = None
+    completed_nodes: List[str] = []
+    failed_nodes: List[str] = []
+    progress_percent: int = 0
+    error: Optional[str] = None
+
+
+class BreakpointHitEvent(BaseModel):
+    """브레이크포인트 도달 이벤트"""
+
+    type: Literal["breakpoint_hit"] = "breakpoint_hit"
+    workflow_id: str
+    node_name: str
+    state: Optional[Dict[str, Any]] = None
+
+
+class BreakpointResumedEvent(BaseModel):
+    """브레이크포인트 재개 이벤트"""
+
+    type: Literal["breakpoint_resumed"] = "breakpoint_resumed"
+    workflow_id: str
+    node_name: str
+
+
 WebSocketEvent: TypeAlias = Annotated[
     AgentStartEvent
     | AgentProgressEvent
@@ -227,7 +287,12 @@ WebSocketEvent: TypeAlias = Annotated[
     | AgentErrorEvent
     | VncUrlSetEvent
     | VncUrlUnsetEvent
-    | HeartbeatEvent,
+    | HeartbeatEvent
+    | ConfirmationRequiredEvent
+    | ConfirmationReceivedEvent
+    | WorkflowStateUpdateEvent
+    | BreakpointHitEvent
+    | BreakpointResumedEvent,
     Field(discriminator="type"),
 ]
 
@@ -406,6 +471,22 @@ class AvailableModelsResponse(BaseModel):
     """Response for available models"""
 
     models: list[str]
+
+
+class AgentTypeInfo(BaseModel):
+    """에이전트 타입 정보"""
+
+    name: str  # VLMAgent, SearchAgent 등
+    description: str
+    base_class: str  # smolagents.CodeAgent 등
+    capabilities: List[str]  # 지원하는 도구/기능 목록
+    default_model: Optional[str] = None  # 기본 사용 모델
+
+
+class AvailableAgentTypesResponse(BaseModel):
+    """Response for available agent types"""
+
+    agent_types: List[AgentTypeInfo]
 
 
 class GenerateInstructionResponse(BaseModel):

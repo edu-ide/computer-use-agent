@@ -8,6 +8,7 @@ import Welcome from "./pages/Welcome";
 import Products from "./pages/Products";
 import WorkflowList from "./pages/WorkflowList";
 import WorkflowDetail from "./pages/WorkflowDetail";
+import { Library } from "./pages/Library";
 import { selectIsDarkMode, useAgentStore } from './stores/agentStore';
 import getTheme from './theme';
 
@@ -32,6 +33,7 @@ const App = () => {
           <Route path="/products" element={<Products />} />
           <Route path="/workflows" element={<WorkflowList />} />
           <Route path="/workflows/:workflowId" element={<WorkflowDetail />} />
+          <Route path="/library" element={<Library />} />
         </Routes>
       </BrowserRouter>
     </ThemeProvider>

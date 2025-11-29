@@ -37,11 +37,14 @@ import {
   FiX,
   FiSave,
   FiMaximize2,
+  FiMinimize2,
   FiZoomIn,
   FiZoomOut,
+  FiFileText,
 } from 'react-icons/fi';
 import CloseIcon from '@mui/icons-material/Close';
 import { saveTrace } from '@/services/workflowApi';
+import { getApiBaseUrl } from '@/config/api';
 
 // 노드 ID -> 한글 이름 매핑
 const NODE_DISPLAY_NAMES: Record<string, string> = {
@@ -125,6 +128,7 @@ export interface VLMStep {
   step_number: number;
   timestamp: string;
   screenshot?: string;
+  screenshot_after?: string;
   thought?: string;
   action?: string;
   observation?: string;
@@ -163,6 +167,7 @@ const VLMStepPanel: React.FC<VLMStepPanelProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const [stepEvaluations, setStepEvaluations] = useState<Record<number, 'like' | 'dislike' | 'neutral'>>({});
+  const [isExpanded, setIsExpanded] = useState(false);
 
   // DB에 트레이스 저장
   const handleSaveTrace = async () => {
@@ -205,6 +210,38 @@ const VLMStepPanel: React.FC<VLMStepPanelProps> = ({
       alert('트레이스 저장에 실패했습니다.');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  // 추론 로그 다운로드 (VLM + Orchestrator 전 과정)
+  const handleDownloadReasoningLogs = async () => {
+    if (!executionId) return;
+
+    try {
+      const apiBase = getApiBaseUrl();
+      const response = await fetch(`${apiBase}/workflows/executions/${executionId}/reasoning-logs?format=text`);
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: '알 수 없는 오류' }));
+        throw new Error(errorData.detail || '추론 로그를 가져올 수 없습니다');
+      }
+      const text = await response.text();
+      const blob = new Blob([text], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `reasoning_logs_${executionId}_${Date.now()}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('추론 로그 다운로드 실패:', error);
+      const errorMessage = error instanceof Error ? error.message : '알 수 없는 오류';
+      if (errorMessage.includes('찾을 수 없음')) {
+        alert('추론 로그를 찾을 수 없습니다.\n실행 중이거나 최근 완료된 워크플로우에서만 다운로드 가능합니다.');
+      } else {
+        alert(`추론 로그 다운로드 실패: ${errorMessage}`);
+      }
     }
   };
 
@@ -352,7 +389,8 @@ const VLMStepPanel: React.FC<VLMStepPanelProps> = ({
         right: 0,
         top: 56,
         bottom: 0,
-        width: { xs: '100%', sm: 360 },
+        width: { xs: '100%', sm: isExpanded ? '80vw' : 360 },
+        transition: 'width 0.3s ease',
         display: 'flex',
         flexDirection: 'column',
         bgcolor: 'background.paper',
@@ -429,6 +467,14 @@ const VLMStepPanel: React.FC<VLMStepPanelProps> = ({
               }}
             />
           )}
+          {/* 추론 로그 다운로드 - 실행 중에도 가능 */}
+          {steps.length > 0 && executionId && (
+            <Tooltip title="추론 로그 다운로드 (전 과정)">
+              <IconButton size="small" onClick={handleDownloadReasoningLogs}>
+                <FiFileText size={16} />
+              </IconButton>
+            </Tooltip>
+          )}
           {/* 전체 평가 버튼 - 실행 완료 후 */}
           {!isRunning && steps.length > 0 && (
             <>
@@ -476,6 +522,11 @@ const VLMStepPanel: React.FC<VLMStepPanelProps> = ({
               </Tooltip>
             </>
           )}
+          <Tooltip title={isExpanded ? '축소' : '확대'}>
+            <IconButton onClick={() => setIsExpanded(!isExpanded)} size="small">
+              {isExpanded ? <FiMinimize2 size={16} /> : <FiMaximize2 size={16} />}
+            </IconButton>
+          </Tooltip>
           <IconButton onClick={onToggle} size="small">
             <FiChevronRight />
           </IconButton>
@@ -525,86 +576,86 @@ const VLMStepPanel: React.FC<VLMStepPanelProps> = ({
                 const agentInfo = getNodeAgentInfo(group.nodeId);
                 return (
                   <Box key={`group-${groupIndex}-${group.nodeId}`}>
-                  {/* 노드 헤더 */}
-                  <Box
-                    sx={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 1,
-                      mb: 1,
-                      px: 0.5,
-                    }}
-                  >
+                    {/* 노드 헤더 */}
                     <Box
                       sx={{
-                        width: 8,
-                        height: 8,
-                        borderRadius: '50%',
-                        bgcolor: getNodeColor(group.nodeId),
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 1,
+                        mb: 1,
+                        px: 0.5,
                       }}
-                    />
-                    <Typography
-                      variant="caption"
-                      fontWeight={700}
-                      sx={{ color: getNodeColor(group.nodeId) }}
                     >
-                      {getNodeDisplayName(group.nodeId)}
-                    </Typography>
-                    {/* 에이전트 컨텍스트 정보 */}
-                    <Tooltip title={`동일 데스크톱 공유, ${agentInfo.description} (이전 노드 대화 기록 없음)`}>
-                      <Chip
-                        icon={<FiCpu size={10} />}
-                        label={agentInfo.contextShared ? '컨텍스트 공유' : '새 컨텍스트'}
-                        size="small"
+                      <Box
                         sx={{
-                          height: 16,
-                          fontSize: '9px',
-                          bgcolor: agentInfo.contextShared ? '#dbeafe' : '#fef3c7',
-                          color: agentInfo.contextShared ? '#1d4ed8' : '#92400e',
-                          fontWeight: 500,
-                          '& .MuiChip-icon': {
-                            color: agentInfo.contextShared ? '#1d4ed8' : '#92400e',
-                            ml: 0.5,
-                          },
+                          width: 8,
+                          height: 8,
+                          borderRadius: '50%',
+                          bgcolor: getNodeColor(group.nodeId),
                         }}
                       />
-                    </Tooltip>
-                    <Box
-                      sx={{
-                        flex: 1,
-                        height: 1,
-                        bgcolor: 'divider',
-                        ml: 1,
-                      }}
-                    />
-                    <Chip
-                      label={`${group.steps.length}스텝`}
-                      size="small"
-                      sx={{
-                        height: 18,
-                        fontSize: '10px',
-                        bgcolor: `${getNodeColor(group.nodeId)}15`,
-                        color: getNodeColor(group.nodeId),
-                        fontWeight: 600,
-                      }}
-                    />
-                  </Box>
-
-                  {/* 해당 노드의 스텝들 */}
-                  <Stack spacing={1.5} sx={{ ml: 1.5, borderLeft: '2px solid', borderColor: `${getNodeColor(group.nodeId)}30`, pl: 1.5 }}>
-                    {group.steps.map(({ step, index }) => (
-                      <StepItem
-                        key={`${step.step_number}-${index}`}
-                        step={step}
-                        isLatest={index === steps.length - 1 && isRunning}
-                        index={index}
-                        evaluation={stepEvaluations[index] || step.evaluation || 'neutral'}
-                        onEvaluationChange={handleStepEvaluation}
-                        nodeColor={getNodeColor(group.nodeId)}
+                      <Typography
+                        variant="caption"
+                        fontWeight={700}
+                        sx={{ color: getNodeColor(group.nodeId) }}
+                      >
+                        {getNodeDisplayName(group.nodeId)}
+                      </Typography>
+                      {/* 에이전트 컨텍스트 정보 */}
+                      <Tooltip title={`동일 데스크톱 공유, ${agentInfo.description} (이전 노드 대화 기록 없음)`}>
+                        <Chip
+                          icon={<FiCpu size={10} />}
+                          label={agentInfo.contextShared ? '컨텍스트 공유' : '새 컨텍스트'}
+                          size="small"
+                          sx={{
+                            height: 16,
+                            fontSize: '9px',
+                            bgcolor: agentInfo.contextShared ? '#dbeafe' : '#fef3c7',
+                            color: agentInfo.contextShared ? '#1d4ed8' : '#92400e',
+                            fontWeight: 500,
+                            '& .MuiChip-icon': {
+                              color: agentInfo.contextShared ? '#1d4ed8' : '#92400e',
+                              ml: 0.5,
+                            },
+                          }}
+                        />
+                      </Tooltip>
+                      <Box
+                        sx={{
+                          flex: 1,
+                          height: 1,
+                          bgcolor: 'divider',
+                          ml: 1,
+                        }}
                       />
-                    ))}
-                  </Stack>
-                </Box>
+                      <Chip
+                        label={`${group.steps.length}스텝`}
+                        size="small"
+                        sx={{
+                          height: 18,
+                          fontSize: '10px',
+                          bgcolor: `${getNodeColor(group.nodeId)}15`,
+                          color: getNodeColor(group.nodeId),
+                          fontWeight: 600,
+                        }}
+                      />
+                    </Box>
+
+                    {/* 해당 노드의 스텝들 */}
+                    <Stack spacing={1.5} sx={{ ml: 1.5, borderLeft: '2px solid', borderColor: `${getNodeColor(group.nodeId)}30`, pl: 1.5 }}>
+                      {group.steps.map(({ step, index }) => (
+                        <StepItem
+                          key={`${step.step_number}-${index}`}
+                          step={step}
+                          isLatest={index === steps.length - 1 && isRunning}
+                          index={index}
+                          evaluation={stepEvaluations[index] || step.evaluation || 'neutral'}
+                          onEvaluationChange={handleStepEvaluation}
+                          nodeColor={getNodeColor(group.nodeId)}
+                        />
+                      ))}
+                    </Stack>
+                  </Box>
                 );
               });
             })()}
@@ -650,6 +701,7 @@ interface StepItemProps {
 const StepItem: React.FC<StepItemProps> = ({ step, isLatest, index, evaluation, onEvaluationChange, nodeColor = '#64748b' }) => {
   const [expanded, setExpanded] = useState(true);
   const [screenshotModalOpen, setScreenshotModalOpen] = useState(false);
+  const [selectedScreenshot, setSelectedScreenshot] = useState<string | null>(null);
   const [zoomLevel, setZoomLevel] = useState(1);
 
   const handleVote = (e: React.MouseEvent, vote: 'like' | 'dislike') => {
@@ -658,9 +710,10 @@ const StepItem: React.FC<StepItemProps> = ({ step, isLatest, index, evaluation, 
     onEvaluationChange?.(index, newEval);
   };
 
-  const handleScreenshotClick = (e: React.MouseEvent) => {
+  const handleScreenshotClick = (e: React.MouseEvent, src: string) => {
     e.stopPropagation();
     setZoomLevel(1);
+    setSelectedScreenshot(src);
     setScreenshotModalOpen(true);
   };
 
@@ -672,9 +725,9 @@ const StepItem: React.FC<StepItemProps> = ({ step, isLatest, index, evaluation, 
     setZoomLevel((prev) => Math.max(prev - 0.25, 0.5));
   };
 
-  const getScreenshotSrc = () => {
-    if (!step.screenshot) return '';
-    return step.screenshot.startsWith('data:') ? step.screenshot : `data:image/png;base64,${step.screenshot}`;
+  const getScreenshotSrc = (base64Str?: string) => {
+    if (!base64Str) return '';
+    return base64Str.startsWith('data:') ? base64Str : `data:image/png;base64,${base64Str}`;
   };
 
   return (
@@ -759,43 +812,91 @@ const StepItem: React.FC<StepItemProps> = ({ step, isLatest, index, evaluation, 
       {/* 스텝 내용 */}
       <Collapse in={expanded}>
         <Box sx={{ p: 1.5 }}>
-          {/* 스크린샷 */}
-          {step.screenshot && (
-            <Box sx={{ mb: 1.5, position: 'relative' }}>
-              <Box
-                component="img"
-                src={getScreenshotSrc()}
-                alt={`${step.step_number}단계 스크린샷`}
-                onClick={handleScreenshotClick}
-                sx={{
-                  width: '100%',
-                  borderRadius: 1,
-                  border: '1px solid',
-                  borderColor: 'divider',
-                  cursor: 'pointer',
-                  transition: 'transform 0.2s, box-shadow 0.2s',
-                  '&:hover': {
-                    transform: 'scale(1.02)',
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-                  },
-                }}
-              />
-              <Tooltip title="확대 보기">
-                <IconButton
-                  size="small"
-                  onClick={handleScreenshotClick}
-                  sx={{
-                    position: 'absolute',
-                    top: 4,
-                    right: 4,
-                    bgcolor: 'rgba(0,0,0,0.5)',
-                    color: 'white',
-                    '&:hover': { bgcolor: 'rgba(0,0,0,0.7)' },
-                  }}
-                >
-                  <FiMaximize2 size={14} />
-                </IconButton>
-              </Tooltip>
+          {/* 스크린샷 (Before / After) */}
+          {(step.screenshot || step.screenshot_after) && (
+            <Box sx={{ mb: 1.5 }}>
+              {step.screenshot && step.screenshot_after ? (
+                <Box sx={{ display: 'flex', gap: 1 }}>
+                  {/* Before */}
+                  <Box sx={{ flex: 1, position: 'relative' }}>
+                    <Typography variant="caption" sx={{ display: 'block', mb: 0.5, color: 'text.secondary', fontWeight: 600 }}>
+                      Action 전
+                    </Typography>
+                    <Box
+                      component="img"
+                      src={getScreenshotSrc(step.screenshot)}
+                      alt="Action 전"
+                      onClick={(e) => handleScreenshotClick(e, getScreenshotSrc(step.screenshot))}
+                      sx={{
+                        width: '100%',
+                        borderRadius: 1,
+                        border: '1px solid',
+                        borderColor: 'divider',
+                        cursor: 'pointer',
+                        '&:hover': { opacity: 0.9 },
+                      }}
+                    />
+                  </Box>
+                  {/* After */}
+                  <Box sx={{ flex: 1, position: 'relative' }}>
+                    <Typography variant="caption" sx={{ display: 'block', mb: 0.5, color: 'text.secondary', fontWeight: 600 }}>
+                      Action 후
+                    </Typography>
+                    <Box
+                      component="img"
+                      src={getScreenshotSrc(step.screenshot_after)}
+                      alt="Action 후"
+                      onClick={(e) => handleScreenshotClick(e, getScreenshotSrc(step.screenshot_after))}
+                      sx={{
+                        width: '100%',
+                        borderRadius: 1,
+                        border: '1px solid',
+                        borderColor: 'divider',
+                        cursor: 'pointer',
+                        '&:hover': { opacity: 0.9 },
+                      }}
+                    />
+                  </Box>
+                </Box>
+              ) : (
+                // Single image (usually Before)
+                <Box sx={{ position: 'relative' }}>
+                  <Box
+                    component="img"
+                    src={getScreenshotSrc(step.screenshot || step.screenshot_after)}
+                    alt={`${step.step_number}단계 스크린샷`}
+                    onClick={(e) => handleScreenshotClick(e, getScreenshotSrc(step.screenshot || step.screenshot_after))}
+                    sx={{
+                      width: '100%',
+                      borderRadius: 1,
+                      border: '1px solid',
+                      borderColor: 'divider',
+                      cursor: 'pointer',
+                      transition: 'transform 0.2s, box-shadow 0.2s',
+                      '&:hover': {
+                        transform: 'scale(1.02)',
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                      },
+                    }}
+                  />
+                  <Tooltip title="확대 보기">
+                    <IconButton
+                      size="small"
+                      onClick={(e) => handleScreenshotClick(e, getScreenshotSrc(step.screenshot || step.screenshot_after))}
+                      sx={{
+                        position: 'absolute',
+                        top: 4,
+                        right: 4,
+                        bgcolor: 'rgba(0,0,0,0.5)',
+                        color: 'white',
+                        '&:hover': { bgcolor: 'rgba(0,0,0,0.7)' },
+                      }}
+                    >
+                      <FiMaximize2 size={14} />
+                    </IconButton>
+                  </Tooltip>
+                </Box>
+              )}
             </Box>
           )}
 
@@ -920,20 +1021,22 @@ const StepItem: React.FC<StepItemProps> = ({ step, isLatest, index, evaluation, 
                     bgcolor: '#0a0a0a',
                   }}
                 >
-                  <Box
-                    component="img"
-                    src={getScreenshotSrc()}
-                    alt={`${step.step_number}단계 스크린샷`}
-                    sx={{
-                      maxWidth: zoomLevel === 1 ? '100%' : 'none',
-                      maxHeight: zoomLevel === 1 ? '100%' : 'none',
-                      width: zoomLevel !== 1 ? `${zoomLevel * 100}%` : 'auto',
-                      objectFit: 'contain',
-                      borderRadius: 1,
-                      boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-                      transition: 'width 0.2s ease-out',
-                    }}
-                  />
+                  {selectedScreenshot && (
+                    <Box
+                      component="img"
+                      src={selectedScreenshot}
+                      alt={`${step.step_number}단계 스크린샷`}
+                      sx={{
+                        maxWidth: zoomLevel === 1 ? '100%' : 'none',
+                        maxHeight: zoomLevel === 1 ? '100%' : 'none',
+                        width: zoomLevel !== 1 ? `${zoomLevel * 100}%` : 'auto',
+                        objectFit: 'contain',
+                        borderRadius: 1,
+                        boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+                        transition: 'width 0.2s ease-out',
+                      }}
+                    />
+                  )}
                 </Box>
 
                 {/* 하단 정보 바 */}

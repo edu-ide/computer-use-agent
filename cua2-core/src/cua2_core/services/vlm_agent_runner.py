@@ -12,7 +12,7 @@ from datetime import datetime
 from io import BytesIO
 from typing import Any, Callable, Dict, List, Optional
 
-from PIL import Image
+from PIL import Image, ImageDraw
 from smolagents import ActionStep, AgentMaxStepsError
 
 from cua2_core.services.agent_utils.get_model import get_model
@@ -25,6 +25,7 @@ from cua2_core.services.orchestrator_service import (
     OrchestratorService,
     StepAction,
     StepFeedback,
+    ExecutionStrategy,
 )
 
 logger = logging.getLogger(__name__)
@@ -35,7 +36,8 @@ class VLMStepLog:
     """VLM 스텝 로그"""
     step_number: int
     timestamp: str
-    screenshot: Optional[str] = None  # base64 encoded
+    screenshot: Optional[str] = None  # base64 encoded (Before Action)
+    screenshot_after: Optional[str] = None  # base64 encoded (After Action)
     thought: Optional[str] = None
     action: Optional[str] = None
     observation: Optional[str] = None
@@ -43,6 +45,10 @@ class VLMStepLog:
     tool_calls: List[Dict[str, Any]] = field(default_factory=list)
     orchestrator_feedback: Optional[Dict[str, Any]] = None
     duration_ms: Optional[int] = None
+    # 에이전트/모델 정보
+    agent_type: Optional[str] = None  # "VLMAgent", "SearchAgent" 등
+    model_id: Optional[str] = None  # "local-qwen3-vl", "gpt-4o" 등
+    node_name: Optional[str] = None  # 워크플로우 노드 이름
 
 
 @dataclass
@@ -88,57 +94,9 @@ class VLMAgentRunner:
     # 얼리 스탑 설정
     MAX_CONSECUTIVE_ERRORS = 3  # 연속 에러 허용 횟수
 
-    # 봇 감지 패턴 (이 패턴이 thought/observation에 있으면 즉시 중단)
-    BOT_DETECTION_PATTERNS = [
-        "access denied",
-        "액세스 거부",
-        "접근이 거부",
-        "접근 거부",
-        "bot detected",
-        "봇이 감지",
-        "captcha",
-        "캡차",
-        "robot",
-        "로봇이 아닙니다",
-        "are you a robot",
-        "unusual traffic",
-        "비정상적인 트래픽",
-        "too many requests",
-        "rate limit",
-        "blocked",
-        "차단되었습니다",
-        "forbidden",
-        "403",
-        "please verify you are a human",
-        "human verification",
-    ]
-
-    # 실패 패턴 (final_answer나 observation에서 실패를 나타내는 패턴)
-    FAILURE_PATTERNS = [
-        "could not be loaded",
-        "로드할 수 없",
-        "로딩 실패",
-        "failed to load",
-        "screen is black",
-        "screen remains black",
-        "검은 화면",
-        "화면이 검",
-        "page not found",
-        "페이지를 찾을 수 없",
-        "connection refused",
-        "연결 거부",
-        "timeout",
-        "타임아웃",
-        "network error",
-        "네트워크 오류",
-        "unable to",
-        "cannot access",
-        "접근할 수 없",
-        "not visible",
-        "보이지 않",
-        "profile cannot be loaded",
-        "프로필을 로드할 수 없",
-    ]
+    # Note: Rule-based 패턴 체크 완전 제거됨
+    # VLM이 스크린샷을 보고 직접 [ERROR:TYPE] 형식으로 보고함
+    # LangGraph 조건부 엣지에서 에러 타입별 라우팅 처리
 
     def __init__(
         self,
@@ -146,17 +104,20 @@ class VLMAgentRunner:
         max_steps: int = 15,
         data_dir: Optional[str] = None,
         max_consecutive_errors: int = 3,  # 연속 에러 허용 횟수
-        agent_type: str = "vlm",  # "vlm" 또는 "web" - web이면 봇 감지 체크 활성화
-        check_bot_detection: bool = True,  # 봇 감지 체크 활성화 여부
-        orchestrator: Optional[OrchestratorService] = None,  # Orchestrator 연동
+        agent_type: str = "vlm",  # "vlm" 또는 "web"
+        orchestrator: Optional[OrchestratorService] = None,  # Orchestrator 연동 (전략 선택용)
+        planning_interval: Optional[int] = None,  # None=계획 재수립 비활성화 (빠른 추론)
+        check_bot_detection: bool = True,  # Deprecated: VLM이 직접 [ERROR:TYPE] 보고
     ):
         self.model_id = model_id
         self.max_steps = max_steps
         self.data_dir = data_dir or "/tmp/vlm_agent_runner"
         self.max_consecutive_errors = max_consecutive_errors
         self.agent_type = agent_type
-        self.check_bot_detection = check_bot_detection
         self._orchestrator = orchestrator
+        self.planning_interval = planning_interval  # smolagents planning_interval
+        # Note: check_bot_detection은 하위 호환성을 위해 파라미터만 유지, 실제로 사용하지 않음
+        # VLM이 스크린샷을 보고 직접 [ERROR:BOT_DETECTED] 형식으로 보고함
 
         self._sandbox_service = LocalSandboxService(max_sandboxes=1)
         self._current_sandbox = None
@@ -179,32 +140,29 @@ class VLMAgentRunner:
         self._current_observation: Optional[str] = None
         self._current_thought: Optional[str] = None
 
-    def _check_bot_detection(self, thought: Optional[str], observation: Optional[str]) -> Optional[str]:
-        """봇 감지 패턴 체크 - 감지되면 패턴 반환, 아니면 None"""
-        if not self.check_bot_detection:
+        # 추론 로그 (전체 과정 기록)
+        self._reasoning_logs: List[Dict[str, Any]] = []
+
+    def _check_vlm_error_report(self, final_answer: Optional[str]) -> Optional[str]:
+        """
+        VLM이 스크린샷 기반으로 보고한 에러 체크
+
+        VLM이 final_answer에서 [ERROR:TYPE] 형식으로 에러를 보고하면 감지
+        - [ERROR:BOT_DETECTED] - 봇 감지 (CAPTCHA, 접근 거부 등)
+        - [ERROR:PAGE_FAILED] - 페이지 로딩 실패
+        - [ERROR:ACCESS_DENIED] - 접근 거부
+
+        Returns:
+            에러 타입 문자열 또는 None
+        """
+        if not final_answer:
             return None
 
-        text_to_check = ""
-        if thought:
-            text_to_check += thought.lower()
-        if observation:
-            text_to_check += " " + observation.lower()
-
-        for pattern in self.BOT_DETECTION_PATTERNS:
-            if pattern.lower() in text_to_check:
-                return pattern
-
-        return None
-
-    def _check_failure_pattern(self, text: Optional[str]) -> Optional[str]:
-        """실패 패턴 체크 - 감지되면 패턴 반환, 아니면 None"""
-        if not text:
-            return None
-
-        text_lower = text.lower()
-        for pattern in self.FAILURE_PATTERNS:
-            if pattern.lower() in text_lower:
-                return pattern
+        import re
+        # [ERROR:TYPE] 패턴 매칭
+        match = re.search(r'\[ERROR:([A-Z_]+)\]', final_answer)
+        if match:
+            return match.group(1)
 
         return None
 
@@ -244,15 +202,19 @@ class VLMAgentRunner:
         # 모델 가져오기
         model = get_model(self.model_id)
 
-        # 에이전트 생성
+        # 에이전트 생성 (planning_interval로 매 스텝마다 계획 재수립)
         self._current_agent = LocalVisionAgent(
             model=model,
             data_dir=session_data_dir,
             desktop=self._current_sandbox,
             max_steps=self.max_steps,
+            planning_interval=self.planning_interval,  # 적응형 실행: 매 스텝마다 재계획
         )
 
-        logger.info(f"VLM 에이전트 초기화 완료: {session_id}")
+        logger.info(
+            f"VLM 에이전트 초기화 완료: {session_id} "
+            f"(planning_interval={self.planning_interval})"
+        )
         return True
 
     async def run_instruction(
@@ -348,9 +310,35 @@ class VLMAgentRunner:
         self._current_action = None
         self._current_observation = None
 
-        # Orchestrator로부터 동적 시스템 프롬프트 생성
+        # Orchestrator로부터 동적 시스템 프롬프트 및 전략 결정
         final_instruction = instruction
         if self._orchestrator and node_id:
+            # 1. 전략 결정 (Max Tokens 조절용)
+            # Orchestrator가 복잡도를 분석하여 적절한 전략을 제안함
+            decision = self._orchestrator.decide(
+                workflow_id=workflow_id or "default",
+                node_id=node_id,
+                instruction=instruction,
+                params=params or {},
+            )
+            
+            # 전략에 따른 Max Tokens 설정
+            # 복잡한 작업일수록 더 긴 사고 과정(Chain of Thought)이 필요하므로 토큰 수 증가
+            new_max_tokens = 1024  # 기본값
+            if decision.strategy == ExecutionStrategy.CLOUD_HEAVY:
+                new_max_tokens = 4096  # 복잡한 작업 (Thinking 모델 등)은 긴 출력 필요
+            elif decision.strategy == ExecutionStrategy.CLOUD_LIGHT:
+                new_max_tokens = 1024
+            elif decision.strategy == ExecutionStrategy.LOCAL_MODEL:
+                new_max_tokens = 1024
+            
+            # 모델 업데이트 (Max Tokens 적용)
+            if self._current_agent:
+                # 기존 모델 ID 유지하면서 max_tokens만 변경하여 새 모델 인스턴스 생성
+                self._current_agent.model = get_model(self.model_id, max_tokens=new_max_tokens)
+                logger.info(f"[Orchestrator] 전략: {decision.strategy.value}, Max Tokens: {new_max_tokens}로 조정")
+
+            # 2. 동적 프롬프트 생성
             final_instruction = self._orchestrator.get_dynamic_system_prompt(
                 node_id=node_id,
                 base_instruction=instruction,
@@ -405,6 +393,7 @@ class VLMAgentRunner:
             ):
                 # ```로 분리된 경우
                 if "```" in model_output:
+                    # Action 블록 앞부분을 모두 thought로 간주 (Verification 포함)
                     thought = model_output.split("```")[0].replace("\nAction:\n", "").strip()
                 else:
                     # ```가 없으면 전체를 thought로
@@ -423,6 +412,14 @@ class VLMAgentRunner:
                     # action이 비어있으면 다음 부분 시도
                     if not action_sequence.strip() and len(parts) > 2:
                         action_sequence = parts[2]
+
+            # Action 정리 (python 태그 제거)
+            if action_sequence:
+                action_sequence = action_sequence.strip()
+                if action_sequence.startswith("python"):
+                    action_sequence = action_sequence[6:].strip()
+                elif action_sequence.startswith("py"):
+                    action_sequence = action_sequence[2:].strip()
 
             # 스크린샷 처리
             time.sleep(2)  # 액션 후 대기
@@ -468,14 +465,8 @@ class VLMAgentRunner:
             elif hasattr(memory_step, 'tool_result') and memory_step.tool_result:
                 observation = str(memory_step.tool_result)
 
-            # 봇 감지 체크 (WebAgent 모드에서만)
-            detected_pattern = self._check_bot_detection(thought, observation)
-            if detected_pattern:
-                logger.error(f"[BotDetection] 봇 감지됨! 패턴: '{detected_pattern}'")
-                raise BotDetectionException(
-                    f"봇 감지로 인해 즉시 중단 (패턴: {detected_pattern})",
-                    detected_pattern=detected_pattern,
-                )
+            # Note: Rule-based 봇 감지 체크 제거됨
+            # VLM이 스크린샷을 보고 직접 [ERROR:BOT_DETECTED] 형식으로 보고함
 
             # Orchestrator 스텝 평가 (연동된 경우)
             step_feedback_dict = None
@@ -542,7 +533,20 @@ class VLMAgentRunner:
             self._current_action = action_sequence
             self._current_observation = observation
 
-            # 스텝 로그 생성
+            # 추론 로그 저장 (전체 모델 출력 포함)
+            self._reasoning_logs.append({
+                "step_number": step_number,
+                "timestamp": datetime.now().isoformat(),
+                "model_raw_output": model_output,  # 모델의 원본 출력
+                "thought": thought,
+                "action": action_sequence,
+                "observation": observation,
+                "error": step_error,
+                "orchestrator_feedback": step_feedback_dict,
+                "duration_ms": step_duration_ms,
+            })
+
+            # 스텝 로그 생성 (screenshot_after는 아직 None)
             step_log = VLMStepLog(
                 step_number=step_number,
                 timestamp=datetime.now().isoformat(),
@@ -554,17 +558,58 @@ class VLMAgentRunner:
                 tool_calls=parse_function_call(action_sequence) if action_sequence else [],
                 orchestrator_feedback=step_feedback_dict,
                 duration_ms=step_duration_ms,
+                # 에이전트/모델 정보
+                agent_type="VLMAgent",
+                model_id=self.model_id,
+                node_name=self._node_id,
             )
 
-            self._steps.append(step_log)
-
-            if on_step:
-                on_step(step_log)
-
-            # 다음 스크린샷
+            # 다음 스크린샷 (Action After)
             try:
                 screenshot_image = agent.desktop.screenshot()
-                compressed = compress_image_to_max_size(screenshot_image, max_size_kb=500)
+                logger.info(f"Screenshot captured: {screenshot_image.size}")
+
+                # Click Visualization (액션 위치 표시)
+                if hasattr(agent, "click_coordinates") and agent.click_coordinates:
+                    try:
+                        draw = ImageDraw.Draw(screenshot_image)
+                        cx, cy = agent.click_coordinates
+                        radius = 15
+                        # 빨간색 원과 십자선 그리기
+                        draw.ellipse((cx - radius, cy - radius, cx + radius, cy + radius), outline="red", width=3)
+                        draw.line((cx - 25, cy, cx + 25, cy), fill="red", width=2)
+                        draw.line((cx, cy - 25, cx, cy + 25), fill="red", width=2)
+                    except Exception as e:
+                        logger.error(f"클릭 시각화 실패: {e}")
+                    finally:
+                        # 다음 스텝을 위해 초기화
+                        agent.click_coordinates = None
+
+                # BBox Visualization (입력 영역 표시)
+                if hasattr(agent, "last_action_bbox") and agent.last_action_bbox:
+                    try:
+                        draw = ImageDraw.Draw(screenshot_image)
+                        bbox = agent.last_action_bbox
+                        x, y = bbox["x"], bbox["y"]
+                        w, h = bbox["width"], bbox["height"]
+                        
+                        # 초록색 사각형 그리기
+                        draw.rectangle((x, y, x + w, y + h), outline="green", width=3)
+                        
+                        # "Input" 텍스트 표시 (선택 사항)
+                        # draw.text((x, y - 15), "Input", fill="green")
+                    except Exception as e:
+                        logger.error(f"BBox 시각화 실패: {e}")
+                    finally:
+                        agent.last_action_bbox = None
+
+                compressed = compress_image_to_max_size(screenshot_image, max_size_kb=300)
+                
+                # Base64 변환 for screenshot_after
+                buffered = BytesIO()
+                compressed.save(buffered, format="PNG")
+                step_log.screenshot_after = f"data:image/png;base64,{base64.b64encode(buffered.getvalue()).decode('utf-8')}"
+
                 step_filename = f"step-{step_number + 1}"
 
                 # 메모리 정리
@@ -577,36 +622,57 @@ class VLMAgentRunner:
             except Exception as e:
                 logger.error(f"스크린샷 업데이트 오류: {e}")
 
+            # 로그 저장 및 콜백 (스크린샷 확보 후)
+            self._steps.append(step_log)
+
+            if on_step:
+                on_step(step_log)
+
         # 에이전트에 콜백 추가 (smolagents CallbackRegistry 사용)
         self._current_agent.step_callbacks.register(ActionStep, step_callback)
 
         result: Optional[VLMInstructionResult] = None
 
         try:
+            # 초기 스크린샷 캡처 및 전달 (첫 스텝에서 화면을 볼 수 있도록)
+            initial_images = []
+            try:
+                if hasattr(self._current_agent, "desktop"):
+                    screenshot = self._current_agent.desktop.screenshot()
+                    compressed = compress_image_to_max_size(screenshot, max_size_kb=300)
+                    initial_images = [compressed]
+                    
+                    # _last_screenshot 업데이트 (시각화 등을 위해)
+                    self._last_screenshot = (compressed, "step-0")
+            except Exception as e:
+                logger.error(f"초기 스크린샷 캡처 실패: {e}")
+
             # 에이전트 실행 (동적 프롬프트 적용)
             agent_result = await asyncio.wait_for(
-                asyncio.to_thread(self._current_agent.run, final_instruction),
+                asyncio.to_thread(
+                    self._current_agent.run, 
+                    final_instruction, 
+                    images=initial_images
+                ),
                 timeout=600,  # 10분 타임아웃
             )
 
-            # final_answer 결과에서 실패 패턴 체크
+            # final_answer 결과 처리
             final_answer_text = str(agent_result) if agent_result else ""
-            failure_pattern = self._check_failure_pattern(final_answer_text)
 
-            # 마지막 observation에서도 실패 패턴 체크
-            if not failure_pattern and self._steps:
-                last_obs = self._steps[-1].observation
-                failure_pattern = self._check_failure_pattern(last_obs)
+            # VLM이 스크린샷 기반으로 감지한 에러 패턴 체크
+            # [ERROR:BOT_DETECTED], [ERROR:PAGE_FAILED], [ERROR:ACCESS_DENIED] 등
+            vlm_error_type = self._check_vlm_error_report(final_answer_text)
 
-            if failure_pattern:
-                logger.warning(f"[FailurePattern] 실패 패턴 감지: '{failure_pattern}' in '{final_answer_text[:100]}...'")
+            if vlm_error_type:
+                logger.warning(f"[VLM Error] VLM이 에러 감지: type={vlm_error_type}, msg='{final_answer_text[:100]}...'")
                 result = VLMInstructionResult(
                     success=False,
-                    error=f"실패 패턴 감지: {failure_pattern}",
-                    data={"steps_count": len(self._steps), "final_answer": final_answer_text},
+                    error=f"VLM 에러 감지: {vlm_error_type}",
+                    data={"steps_count": len(self._steps), "final_answer": final_answer_text, "error_type": vlm_error_type},
                     steps=self._steps,
                     early_stopped=True,
-                    early_stop_reason=f"실패 패턴 감지: {failure_pattern}",
+                    early_stop_reason=f"VLM 에러 감지: {vlm_error_type}",
                 )
             else:
                 result = VLMInstructionResult(
@@ -771,3 +837,63 @@ class VLMAgentRunner:
             "step_count": len(self._steps),
             "max_consecutive_errors": self.max_consecutive_errors,
         }
+
+    def get_reasoning_logs(self) -> List[Dict[str, Any]]:
+        """
+        전체 추론 로그 반환 (모델의 원본 출력 포함)
+
+        비효율적인 추론 패턴 분석용으로 사용
+        """
+        return self._reasoning_logs.copy()
+
+    def get_reasoning_logs_text(self) -> str:
+        """추론 로그를 텍스트 형식으로 반환 (다운로드용)"""
+        lines = []
+        lines.append("=" * 80)
+        lines.append(f"VLM 추론 로그 - {self._node_id or 'Unknown Node'}")
+        lines.append(f"모델: {self.model_id}")
+        lines.append(f"총 스텝: {len(self._reasoning_logs)}")
+        lines.append("=" * 80)
+        lines.append("")
+
+        for log in self._reasoning_logs:
+            lines.append(f"--- Step {log['step_number']} ({log['timestamp']}) ---")
+            lines.append(f"Duration: {log.get('duration_ms', 'N/A')}ms")
+            lines.append("")
+
+            # 모델 원본 출력
+            if log.get("model_raw_output"):
+                lines.append("[Model Raw Output]")
+                lines.append(log["model_raw_output"])
+                lines.append("")
+
+            # 추출된 정보
+            if log.get("thought"):
+                lines.append("[Thought]")
+                lines.append(log["thought"])
+                lines.append("")
+
+            if log.get("action"):
+                lines.append("[Action]")
+                lines.append(log["action"])
+                lines.append("")
+
+            if log.get("observation"):
+                lines.append("[Observation]")
+                lines.append(str(log["observation"]))
+                lines.append("")
+
+            if log.get("error"):
+                lines.append("[Error]")
+                lines.append(log["error"])
+                lines.append("")
+
+            if log.get("orchestrator_feedback"):
+                lines.append("[Orchestrator Feedback]")
+                lines.append(str(log["orchestrator_feedback"]))
+                lines.append("")
+
+            lines.append("")
+
+        return "\n".join(lines)
+
