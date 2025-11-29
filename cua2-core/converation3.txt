@@ -1,0 +1,1013 @@
+
+╭─── Claude Code v2.0.55 ──────────────────────────────────────────────────────╮
+│                                           │ Tips for getting started         │
+│           Welcome back Yeo Won!           │ Run /init to create a CLAUDE.md… │
+│                                           │ ──────────────────────────────── │
+│                  ▐▛███▜▌                  │ Recent activity                  │
+│                 ▝▜█████▛▘                 │ No recent activity               │
+│                   ▘▘ ▝▝                   │                                  │
+│                                           │                                  │
+│           Opus 4.5 · Claude Max           │                                  │
+│   ~/ws/llm/computer-use-agent/cua2-core   │                                  │
+╰──────────────────────────────────────────────────────────────────────────────╯
+══════════════════ Conversation compacted · ctrl+o for history ═════════════════
+  ⎿  Referenced file src/cua2_core/workflows/coupang_workflow.py
+  ⎿  Referenced file src/cua2_core/services/orchestrator_service.py
+  ⎿  Referenced file src/cua2_core/services/vlm_agent_runner.py
+  ⎿  Referenced file 
+     ../../../../다운로드/trace_open_coupang_coupang-collect-20251129103132.json
+  ⎿  Referenced file ../cua2-front/src/components/workflow/NodeDetailModal.tsx
+
+● 네, 맞습니다. Orchestrator는 VLM 실행 결과에서 다음 텍스트들을 검사합니다:
+
+  1. final_answer - VLM이 최종적으로 반환한 답변
+  2. last_observation - 마지막 스텝의 관찰 내용 (화면 상태 등)
+  3. last_thought - 마지막 스텝의 사고 내용
+
+  이 텍스트들에서 봇 감지 패턴(access denied, captcha, forbidden 등)이나
+  실패 패턴(could not be loaded, screen is black 등)이 발견되면 노드를
+  실패로 처리하고 error_handler로 라우팅합니다.
+
+  구현이 완료되었으니 이제 워크플로우를 다시 테스트해보시면 됩니다. Firefox
+  프로필 에러 같은 상황에서:
+
+  1. VLM이 "profile cannot be loaded" 같은 메시지를 final_answer로 반환
+  2. Orchestrator가 이를 감지하여 page_load_failed 에러 타입으로 분류
+  3. 노드가 실패로 마킹되고 error_handler 노드로 이동
+
+  이렇게 동작할 것입니다. 테스트해보시겠어요?
+
+> 한단계 진행 될때마다 orchestrator 가 역할을 하는건가? 
+
+● 네, 현재 구현은 각 노드 실행이 완료된 후 Orchestrator가 검증합니다.
+
+  하지만 더 세밀하게 각 VLM 스텝마다 Orchestrator가 개입하도록 할 수도
+  있습니다. 현재 구조를 확인해볼게요:
+
+● Read(src/cua2_core/services/vlm_agent_runner.py)
+  ⎿  Read 100 lines
+
+● Search(pattern: "def _step_callback", path:
+        "src/cua2_core/services/vlm_agent_runner.py", output_mode: "content")
+  ⎿  Found 0 lines 
+
+● Search(pattern: "step_callback|on_step", path:
+        "src/cua2_core/services/vlm_agent_runner.py", output_mode: "content")
+  ⎿  Found 20 lines (ctrl+o to expand)
+
+● 현재 구조를 보면 on_step 콜백이 있어서 각 VLM 스텝마다 개입할 수 있습니다.
+
+
+  현재 흐름을 정리하면:
+
+  현재 구현:
+  ┌─────────────────────────────────────────────────────┐
+  │ 노드 실행                                            │
+  │  ├── VLM 스텝 1 → on_step 콜백 (로그만)              │
+  │  ├── VLM 스텝 2 → on_step 콜백 (로그만)              │
+  │  ├── VLM 스텝 3 → on_step 콜백 (로그만)              │
+  │  └── 완료                                           │
+  │                                                     │
+  │  → Orchestrator.validate_execution_result() ← 여기서 검증 │
+  └─────────────────────────────────────────────────────┘
+
+  더 세밀한 제어가 필요하다면:
+
+  개선된 구현:
+  ┌─────────────────────────────────────────────────────┐
+  │ 노드 실행                                            │
+  │  ├── VLM 스텝 1 → Orchestrator 검증 → 계속/중단 결정  │
+  │  ├── VLM 스텝 2 → Orchestrator 검증 → 계속/중단 결정  │
+  │  ├── VLM 스텝 3 → Orchestrator 검증 → 계속/중단 결정  │
+  │  └── 완료                                           │
+  └─────────────────────────────────────────────────────┘
+
+  각 스텝마다 Orchestrator가 개입하면:
+  - 봇 감지 시 즉시 중단 (다음 스텝 진행 안 함)
+  - 실패 패턴 발견 시 전략 변경 가능
+
+  이렇게 변경할까요?
+
+> 각 스텝마다 개입을 하고 시스템 프롬프트도 자체적으로 업데이트도 하고 자체 
+개선로직이 들어가면 좋을것 같음 
+
+● 좋은 아이디어입니다! Orchestrator가 각 스텝마다:
+
+  1. 검증 - 봇 감지/실패 패턴 체크
+  2. 시스템 프롬프트 동적 업데이트 - 상황에 맞게 지시사항 추가
+  3. 자체 개선 - 실패 패턴 학습, 전략 조정
+
+  이런 구조로 구현해보겠습니다.
+
+● Read(src/cua2_core/services/orchestrator_service.py)
+  ⎿  Read 1488 lines
+
+● 이제 Orchestrator에 스텝별 개입 기능을 추가하겠습니다:
+
+● Update(src/cua2_core/services/orchestrator_service.py)
+  ⎿  Updated src/cua2_core/services/orchestrator_service.py with 24        
+     additions
+        87        error_message: str = ""
+        88    
+        89    
+        90 +  class StepAction(Enum):
+        91 +      """스텝별 Orchestrator 액션"""
+        92 +      CONTINUE = "continue"  # 계속 진행
+        93 +      STOP = "stop"  # 즉시 중단
+        94 +      INJECT_PROMPT = "inject_prompt"  # 추가 프롬프트 주입
+        95 +      RETRY_STEP = "retry_step"  # 현재 스텝 재시도
+        96 +      CHANGE_STRATEGY = "change_strategy"  # 전략 변경
+        97 +  
+        98 +  
+        99    @dataclass
+       100 +  class StepFeedback:
+       101 +      """스텝 실행 후 Orchestrator 피드백"""
+       102 +      action: StepAction
+       103 +      reason: str = ""
+       104 +      # 프롬프트 주입
+       105 +      injected_prompt: Optional[str] = None  # VLM에 추가할 
+           + 지시사항
+       106 +      # 전략 변경
+       107 +      new_strategy: Optional[ExecutionStrategy] = None
+       108 +      # 학습된 패턴
+       109 +      learned_pattern: Optional[str] = None
+       110 +      # 다음 스텝 힌트
+       111 +      next_step_hint: Optional[str] = None
+       112 +  
+       113 +  
+       114 +  @dataclass
+       115    class NodeExecutionRecord:
+       116        """노드 실행 기록"""
+       117        node_id: str
+
+● 이제 스텝별 검증 및 피드백 메서드를 추가합니다:
+
+● Update(src/cua2_core/services/orchestrator_service.py)
+  ⎿  Updated src/cua2_core/services/orchestrator_service.py with 287       
+     additions
+       1066            }
+       1067            return fallbacks.get(current)
+       1068    
+       1069 +      # ===============================
+       1070 +      # Step-level Intervention (스텝별 개입)
+       1071 +      # ===============================
+       1072 +  
+       1073 +      # 스텝별 학습 저장소
+       1074 +      _step_patterns: Dict[str, List[Dict[str, Any]]] = {}  
+            + # node_id -> 학습된 패턴들
+       1075 +      _prompt_injections: Dict[str, str] = {}  # 동적 
+            + 프롬프트 주입
+       1076 +  
+       1077 +      # 상황별 프롬프트 템플릿
+       1078 +      SITUATION_PROMPTS = {
+       1079 +          "slow_loading": "페이지 로딩이 느립니다. 5초 정도 
+            + 기다린 후 다시 시도하세요.",
+       1080 +          "element_not_visible": "요소가 보이지 않습니다. 
+            + 스크롤하거나 페이지를 새로고침하세요.",
+       1081 +          "popup_detected": "팝업이 감지되었습니다. 닫기 
+            + 버튼을 찾아 클릭하세요.",
+       1082 +          "login_required": "로그인이 필요합니다. 로그인 
+            + 페이지로 이동하세요.",
+       1083 +          "captcha_warning": "캡차가 감지될 수 있습니다. 
+            + 천천히 자연스럽게 행동하세요.",
+       1084 +          "page_changed": "페이지가 변경되었습니다. 현재 
+            + 화면을 다시 분석하세요.",
+       1085 +          "error_recovery": "오류가 발생했습니다. 뒤로 가기 
+            + 후 다시 시도하세요.",
+       1086 +      }
+       1087 +  
+       1088 +      def evaluate_step(
+       1089 +          self,
+       1090 +          workflow_id: str,
+       1091 +          node_id: str,
+       1092 +          step_number: int,
+       1093 +          thought: Optional[str],
+       1094 +          action: Optional[str],
+       1095 +          observation: Optional[str],
+       1096 +          screenshot_analysis: Optional[str] = None,
+       1097 +      ) -> StepFeedback:
+       1098 +          """
+       1099 +          각 VLM 스텝 실행 후 평가 및 피드백
+       1100 +  
+       1101 +          Args:
+       1102 +              workflow_id: 워크플로우 ID
+       1103 +              node_id: 노드 ID
+       1104 +              step_number: 스텝 번호
+       1105 +              thought: VLM의 사고
+       1106 +              action: 실행한 액션
+       1107 +              observation: 관찰 결과
+       1108 +              screenshot_analysis: 스크린샷 분석 결과 
+            + (optional)
+       1109 +  
+       1110 +          Returns:
+       1111 +              StepFeedback: 다음 스텝에 대한 피드백
+       1112 +          """
+       1113 +          # 1. 봇 감지 패턴 체크 (최우선 - 즉시 중단)
+       1114 +          for text in [thought, observation, 
+            + screenshot_analysis]:
+       1115 +              if text:
+       1116 +                  for pattern in 
+            + self.BOT_DETECTION_PATTERNS:
+       1117 +                      if pattern.lower() in text.lower():
+       1118 +                          logger.error(f"[Orchestrator] 스텝
+            +  {step_number}: 봇 감지! pattern='{pattern}'")
+       1119 +                          log_orchestrator(
+       1120 +                              ActivityType.ERROR,
+       1121 +                              f"봇 감지 (스텝 
+            + {step_number})",
+       1122 +                              details={"pattern": pattern, 
+            + "node_id": node_id},
+       1123 +                              execution_id=workflow_id,
+       1124 +                              node_id=node_id,
+       1125 +                          )
+       1126 +                          return StepFeedback(
+       1127 +                              action=StepAction.STOP,
+       1128 +                              reason=f"봇 감지 패턴 발견: 
+            + {pattern}",
+       1129 +                              learned_pattern=pattern,
+       1130 +                          )
+       1131 +  
+       1132 +          # 2. 실패 패턴 체크
+       1133 +          for text in [thought, observation]:
+       1134 +              if text:
+       1135 +                  for pattern in self.FAILURE_PATTERNS:
+       1136 +                      if pattern.lower() in text.lower():
+       1137 +                          logger.warning(f"[Orchestrator] 
+            + 스텝 {step_number}: 실패 패턴 '{pattern}'")
+       1138 +                          # 실패 시 복구 프롬프트 주입
+       1139 +                          return StepFeedback(
+       1140 +                              
+            + action=StepAction.INJECT_PROMPT,
+       1141 +                              reason=f"실패 패턴 발견: 
+            + {pattern}",
+       1142 +                              injected_prompt=self.SITUATION
+            + _PROMPTS.get("error_recovery", ""),
+       1143 +                              learned_pattern=pattern,
+       1144 +                          )
+       1145 +  
+       1146 +          # 3. 상황별 프롬프트 주입 체크
+       1147 +          feedback = self._check_situation_and_inject(
+       1148 +              thought=thought,
+       1149 +              observation=observation,
+       1150 +              action=action,
+       1151 +          )
+       1152 +          if feedback:
+       1153 +              return feedback
+       1154 +  
+       1155 +          # 4. 학습된 패턴 기반 조언
+       1156 +          hint = self._get_learned_hint(node_id, 
+            + step_number, thought, action)
+       1157 +  
+       1158 +          # 5. 정상 진행
+       1159 +          log_orchestrator(
+       1160 +              ActivityType.INFO,
+       1161 +              f"스텝 {step_number} 정상",
+       1162 +              details={"action": action[:50] if action else 
+            + None},
+       1163 +              execution_id=workflow_id,
+       1164 +              node_id=node_id,
+       1165 +          )
+       1166 +  
+       1167 +          return StepFeedback(
+       1168 +              action=StepAction.CONTINUE,
+       1169 +              reason="정상 진행",
+       1170 +              next_step_hint=hint,
+       1171 +          )
+       1172 +  
+       1173 +      def _check_situation_and_inject(
+       1174 +          self,
+       1175 +          thought: Optional[str],
+       1176 +          observation: Optional[str],
+       1177 +          action: Optional[str],
+       1178 +      ) -> Optional[StepFeedback]:
+       1179 +          """상황 감지 및 프롬프트 주입"""
+       1180 +          combined_text = " ".join(filter(None, [thought, 
+            + observation])).lower()
+       1181 +  
+       1182 +          # 로딩 느림 감지
+       1183 +          if any(kw in combined_text for kw in ["loading", 
+            + "로딩", "느림", "waiting", "기다"]):
+       1184 +              return StepFeedback(
+       1185 +                  action=StepAction.INJECT_PROMPT,
+       1186 +                  reason="느린 로딩 감지",
+       1187 +                  
+            + injected_prompt=self.SITUATION_PROMPTS["slow_loading"],
+       1188 +              )
+       1189 +  
+       1190 +          # 요소 찾기 실패
+       1191 +          if any(kw in combined_text for kw in ["not found",
+            +  "찾을 수 없", "보이지 않", "not visible"]):
+       1192 +              return StepFeedback(
+       1193 +                  action=StepAction.INJECT_PROMPT,
+       1194 +                  reason="요소 미발견",
+       1195 +                  injected_prompt=self.SITUATION_PROMPTS["el
+            + ement_not_visible"],
+       1196 +              )
+       1197 +  
+       1198 +          # 팝업 감지
+       1199 +          if any(kw in combined_text for kw in ["popup", 
+            + "팝업", "modal", "모달", "dialog", "알림"]):
+       1200 +              return StepFeedback(
+       1201 +                  action=StepAction.INJECT_PROMPT,
+       1202 +                  reason="팝업 감지",
+       1203 +                  
+            + injected_prompt=self.SITUATION_PROMPTS["popup_detected"],
+       1204 +              )
+       1205 +  
+       1206 +          # 로그인 필요
+       1207 +          if any(kw in combined_text for kw in ["login", 
+            + "로그인", "sign in", "인증"]):
+       1208 +              return StepFeedback(
+       1209 +                  action=StepAction.INJECT_PROMPT,
+       1210 +                  reason="로그인 필요",
+       1211 +                  
+            + injected_prompt=self.SITUATION_PROMPTS["login_required"],
+       1212 +              )
+       1213 +  
+       1214 +          return None
+       1215 +  
+       1216 +      def _get_learned_hint(
+       1217 +          self,
+       1218 +          node_id: str,
+       1219 +          step_number: int,
+       1220 +          thought: Optional[str],
+       1221 +          action: Optional[str],
+       1222 +      ) -> Optional[str]:
+       1223 +          """학습된 패턴 기반 힌트 제공"""
+       1224 +          if node_id not in self._step_patterns:
+       1225 +              return None
+       1226 +  
+       1227 +          patterns = self._step_patterns[node_id]
+       1228 +          for pattern in patterns:
+       1229 +              if pattern.get("step_number") == step_number:
+       1230 +                  return pattern.get("hint")
+       1231 +  
+       1232 +          return None
+       1233 +  
+       1234 +      def learn_from_step(
+       1235 +          self,
+       1236 +          node_id: str,
+       1237 +          step_number: int,
+       1238 +          success: bool,
+       1239 +          thought: Optional[str],
+       1240 +          action: Optional[str],
+       1241 +          observation: Optional[str],
+       1242 +      ):
+       1243 +          """
+       1244 +          스텝 실행 결과로부터 학습
+       1245 +  
+       1246 +          성공/실패 패턴을 저장하여 향후 같은 상황에서 더 
+            + 나은 결정
+       1247 +          """
+       1248 +          if node_id not in self._step_patterns:
+       1249 +              self._step_patterns[node_id] = []
+       1250 +  
+       1251 +          pattern_entry = {
+       1252 +              "step_number": step_number,
+       1253 +              "success": success,
+       1254 +              "action_type": 
+            + self._extract_action_type(action),
+       1255 +              "context_keywords": 
+            + self._extract_keywords(thought, observation),
+       1256 +              "timestamp": time.time(),
+       1257 +          }
+       1258 +  
+       1259 +          # 실패한 경우 힌트 추가
+       1260 +          if not success and action:
+       1261 +              pattern_entry["hint"] = f"이전에 
+            + '{action[:30]}' 액션이 실패했습니다. 다른 방법을 
+            + 시도하세요."
+       1262 +  
+       1263 +          self._step_patterns[node_id].append(pattern_entry)
+       1264 +  
+       1265 +          # 최대 20개 패턴만 유지
+       1266 +          if len(self._step_patterns[node_id]) > 20:
+       1267 +              self._step_patterns[node_id] = 
+            + self._step_patterns[node_id][-20:]
+       1268 +  
+       1269 +          logger.debug(f"[Orchestrator] 학습 저장: {node_id}
+            +  스텝 {step_number} (success={success})")
+       1270 +  
+       1271 +      def _extract_action_type(self, action: Optional[str]) 
+            + -> Optional[str]:
+       1272 +          """액션에서 타입 추출"""
+       1273 +          if not action:
+       1274 +              return None
+       1275 +          action_lower = action.lower()
+       1276 +          if "click" in action_lower:
+       1277 +              return "click"
+       1278 +          elif "type" in action_lower or "input" in 
+            + action_lower:
+       1279 +              return "type"
+       1280 +          elif "scroll" in action_lower:
+       1281 +              return "scroll"
+       1282 +          elif "wait" in action_lower:
+       1283 +              return "wait"
+       1284 +          return "other"
+       1285 +  
+       1286 +      def _extract_keywords(self, *texts: Optional[str]) -> 
+            + List[str]:
+       1287 +          """텍스트에서 주요 키워드 추출"""
+       1288 +          keywords = []
+       1289 +          for text in texts:
+       1290 +              if not text:
+       1291 +                  continue
+       1292 +              # 간단한 키워드 추출 (실제로는 더 정교한 NLP 
+            + 사용 가능)
+       1293 +              words = text.lower().split()
+       1294 +              important = [w for w in words if len(w) > 3 
+            + and w.isalpha()]
+       1295 +              keywords.extend(important[:5])
+       1296 +          return list(set(keywords))[:10]
+       1297 +  
+       1298 +      def get_dynamic_system_prompt(
+       1299 +          self,
+       1300 +          node_id: str,
+       1301 +          base_instruction: str,
+       1302 +          step_number: int = 0,
+       1303 +      ) -> str:
+       1304 +          """
+       1305 +          동적 시스템 프롬프트 생성
+       1306 +  
+       1307 +          기본 instruction에 학습된 패턴, 상황별 조언을 추가
+       1308 +          """
+       1309 +          additions = []
+       1310 +  
+       1311 +          # 1. 노드별 학습된 조언
+       1312 +          if node_id in self._step_patterns:
+       1313 +              patterns = self._step_patterns[node_id]
+       1314 +              failed_patterns = [p for p in patterns if not 
+            + p.get("success")]
+       1315 +              if failed_patterns:
+       1316 +                  recent_failures = failed_patterns[-3:]  # 
+            + 최근 3개
+       1317 +                  failure_hints = [p.get("hint") for p in 
+            + recent_failures if p.get("hint")]
+       1318 +                  if failure_hints:
+       1319 +                      additions.append("주의사항:")
+       1320 +                      for hint in failure_hints:
+       1321 +                          additions.append(f"  - {hint}")
+       1322 +  
+       1323 +          # 2. 주입된 프롬프트
+       1324 +          injection_key = f"{node_id}:{step_number}"
+       1325 +          if injection_key in self._prompt_injections:
+       1326 +              
+            + additions.append(self._prompt_injections[injection_key])
+       1327 +  
+       1328 +          # 3. 일반적인 봇 회피 조언 (항상 추가)
+       1329 +          additions.append("\n[자연스러운 행동 가이드]")
+       1330 +          additions.append("- 각 액션 사이에 자연스러운 
+            + 간격을 두세요")
+       1331 +          additions.append("- 한 번에 너무 많은 작업을 하지 
+            + 마세요")
+       1332 +          additions.append("- 페이지가 완전히 로드될 때까지 
+            + 기다리세요")
+       1333 +  
+       1334 +          if additions:
+       1335 +              return base_instruction + "\n\n" + 
+            + "\n".join(additions)
+       1336 +  
+       1337 +          return base_instruction
+       1338 +  
+       1339 +      def inject_prompt_for_next_step(
+       1340 +          self,
+       1341 +          node_id: str,
+       1342 +          step_number: int,
+       1343 +          prompt: str,
+       1344 +      ):
+       1345 +          """다음 스텝에 프롬프트 주입"""
+       1346 +          injection_key = f"{node_id}:{step_number + 1}"
+       1347 +          self._prompt_injections[injection_key] = prompt
+       1348 +          logger.info(f"[Orchestrator] 프롬프트 주입 예약: 
+            + {injection_key}")
+       1349 +  
+       1350 +      def clear_injections(self, node_id: str):
+       1351 +          """노드의 모든 주입된 프롬프트 제거"""
+       1352 +          keys_to_remove = [k for k in 
+            + self._prompt_injections if k.startswith(f"{node_id}:")]
+       1353 +          for k in keys_to_remove:
+       1354 +              del self._prompt_injections[k]
+       1355 +  
+       1356        def validate_execution_result(
+       1357            self,
+       1358            workflow_id: str,
+
+> 그리고 버전을 관리 했으면 좋겠어 개선을 했다면 
+
+● 버전 관리 시스템도 추가하겠습니다. 먼저 VLMAgentRunner에 Orchestrator
+  콜백을 연동하고, 그 다음 버전 관리를 추가합니다.
+
+● Read(src/cua2_core/services/vlm_agent_runner.py)
+  ⎿  Read 200 lines
+
+● Read(src/cua2_core/services/vlm_agent_runner.py)
+  ⎿  Read 150 lines
+
+● 이제 VLMAgentRunner에 Orchestrator 연동을 추가하겠습니다:
+
+● Read(src/cua2_core/services/vlm_agent_runner.py)
+  ⎿  Read 30 lines
+
+● Update(src/cua2_core/services/vlm_agent_runner.py)
+  ⎿  Updated src/cua2_core/services/vlm_agent_runner.py with 5 additions
+       21    from cua2_core.services.local_sandbox_service import 
+            LocalSandboxService
+       22    from cua2_core.services.utils import 
+            compress_image_to_max_size
+       23    from cua2_core.services.trace_store import get_trace_store
+       24 +  from cua2_core.services.orchestrator_service import (
+       25 +      OrchestratorService,
+       26 +      StepAction,
+       27 +      StepFeedback,
+       28 +  )
+       29    
+       30    logger = logging.getLogger(__name__)
+       31    
+
+● Search(pattern: "class VLMAgentRunner:", path:
+        "src/cua2_core/services/vlm_agent_runner.py", output_mode: "content")
+  ⎿  Found 20 lines (ctrl+o to expand)
+
+● Search(pattern: "def __init__\(self", path:
+        "src/cua2_core/services/vlm_agent_runner.py", output_mode: "content")
+  ⎿  Found 20 lines (ctrl+o to expand)
+
+● Read(src/cua2_core/services/vlm_agent_runner.py)
+  ⎿  Read 60 lines
+
+● 이제 VLMAgentRunner에 Orchestrator를 추가하겠습니다:
+
+● Update(src/cua2_core/services/vlm_agent_runner.py)
+  ⎿  Updated src/cua2_core/services/vlm_agent_runner.py with 7 additions 
+       146            max_consecutive_errors: int = 3,  # 연속 에러 허용 
+             횟수
+       147            agent_type: str = "vlm",  # "vlm" 또는 "web" - 
+             web이면 봇 감지 체크 활성화
+       148            check_bot_detection: bool = True,  # 봇 감지 체크 
+             활성화 여부
+       149 +          orchestrator: Optional[OrchestratorService] = None,
+           +   # Orchestrator 연동
+       150        ):
+       151            self.model_id = model_id
+       152            self.max_steps = max_steps
+     ...
+       153            self.max_consecutive_errors = 
+             max_consecutive_errors
+       154            self.agent_type = agent_type
+       155            self.check_bot_detection = check_bot_detection
+       156 +          self._orchestrator = orchestrator
+       157    
+       158            self._sandbox_service = 
+             LocalSandboxService(max_sandboxes=1)
+       159            self._current_sandbox = None
+     ...
+       162            self._last_screenshot: Optional[tuple[Image.Image, 
+             str]] = None
+       163            self._should_stop = False
+       164    
+       165 +          # Orchestrator 컨텍스트
+       166 +          self._workflow_id: Optional[str] = None
+       167 +          self._node_id: Optional[str] = None
+       168 +          self._injected_prompt: Optional[str] = None  # 다음
+           +  스텝에 주입할 프롬프트
+       169 +  
+       170            # 연속 에러 추적
+       171            self._consecutive_errors: int = 0
+       172            self._last_error: Optional[str] = None
+
+● 이제 step_callback 부분에 Orchestrator 평가를 추가합니다:
+
+● Update(src/cua2_core/services/vlm_agent_runner.py)
+  ⎿  Updated src/cua2_core/services/vlm_agent_runner.py with 34 additions
+       450                        detected_pattern=detected_pattern,
+       451                    )
+       452    
+       453 +              # Orchestrator 스텝 평가 (연동된 경우)
+       454 +              if self._orchestrator and self._workflow_id and
+           +  self._node_id:
+       455 +                  feedback = 
+           + self._orchestrator.evaluate_step(
+       456 +                      workflow_id=self._workflow_id,
+       457 +                      node_id=self._node_id,
+       458 +                      step_number=step_number,
+       459 +                      thought=thought,
+       460 +                      action=action_sequence,
+       461 +                      observation=observation,
+       462 +                  )
+       463 +  
+       464 +                  # 피드백에 따른 처리
+       465 +                  if feedback.action == StepAction.STOP:
+       466 +                      logger.error(f"[Orchestrator] 스텝 중단
+           +  지시: {feedback.reason}")
+       467 +                      raise BotDetectionException(
+       468 +                          f"Orchestrator 중단: 
+           + {feedback.reason}",
+       469 +                          
+           + detected_pattern=feedback.learned_pattern or "unknown",
+       470 +                      )
+       471 +                  elif feedback.action == 
+           + StepAction.INJECT_PROMPT:
+       472 +                      # 다음 스텝에 프롬프트 주입 예약
+       473 +                      if feedback.injected_prompt:
+       474 +                          self._injected_prompt = 
+           + feedback.injected_prompt
+       475 +                          logger.info(f"[Orchestrator] 
+           + 프롬프트 주입 예약: {feedback.injected_prompt[:50]}...")
+       476 +  
+       477 +                  # 학습
+       478 +                  self._orchestrator.learn_from_step(
+       479 +                      node_id=self._node_id,
+       480 +                      step_number=step_number,
+       481 +                      success=step_error is None,
+       482 +                      thought=thought,
+       483 +                      action=action_sequence,
+       484 +                      observation=observation,
+       485 +                  )
+       486 +  
+       487                # 현재 상태 저장 (외부에서 조회용)
+       488                self._current_thought = thought
+       489                self._current_action = action_sequence
+
+● 이제 run_instruction에 workflow_id와 node_id를 저장하고, 동적 프롬프트
+  기능을 추가합니다:
+
+● Read(src/cua2_core/services/vlm_agent_runner.py)
+  ⎿  Read 50 lines
+
+● Update(src/cua2_core/services/vlm_agent_runner.py)
+  ⎿  Updated src/cua2_core/services/vlm_agent_runner.py with 15 additions
+       332            self._steps = []
+       333            step_number = 0
+       334    
+       335 +          # Orchestrator 컨텍스트 설정
+       336 +          self._workflow_id = workflow_id
+       337 +          self._node_id = node_id
+       338 +          self._injected_prompt = None
+       339 +  
+       340            # 연속 에러 카운트 초기화
+       341            self._consecutive_errors = 0
+       342            self._last_error = None
+     ...
+       339            self._current_action = None
+       340            self._current_observation = None
+       341    
+       342 +          # Orchestrator로부터 동적 시스템 프롬프트 생성
+       343 +          final_instruction = instruction
+       344 +          if self._orchestrator and node_id:
+       345 +              final_instruction = 
+           + self._orchestrator.get_dynamic_system_prompt(
+       346 +                  node_id=node_id,
+       347 +                  base_instruction=instruction,
+       348 +                  step_number=0,
+       349 +              )
+       350 +              logger.info(f"[Orchestrator] 동적 프롬프트 적용
+           +  (원본 {len(instruction)}자 → {len(final_instruction)}자)")
+       351 +  
+       352            # 초기 스크린샷
+       353            try:
+       354                screenshot_image = 
+             self._current_agent.desktop.screenshot()
+
+● 이제 에이전트 실행 부분에서 final_instruction을 사용하도록 수정합니다:
+
+● Search(pattern: "self._current_agent.run.*instruction", path:
+        "src/cua2_core/services/vlm_agent_runner.py", output_mode: "content")
+  ⎿  Found 7 lines (ctrl+o to expand)
+
+> 오케스트레이터 판단 시간도 로그남기거나 시각화 하면 좋을것 같음 
+
+● Update(src/cua2_core/services/vlm_agent_runner.py)
+  ⎿  Updated src/cua2_core/services/vlm_agent_runner.py with 2 additions an
+      2 removals
+       543            result: Optional[VLMInstructionResult] = None
+       544    
+       545            try:
+       546 -              # 에이전트 실행
+       546 +              # 에이전트 실행 (동적 프롬프트 적용)
+       547                agent_result = await asyncio.wait_for(
+       548 -                  asyncio.to_thread(self._current_agent.run, 
+           -  instruction),
+       548 +                  asyncio.to_thread(self._current_agent.run, 
+           +  final_instruction),
+       549                    timeout=600,  # 10분 타임아웃
+       550                )
+       551    
+
+● 이제 Orchestrator 평가에 시간 측정과 로그를 추가하고, 버전 관리 시스템을
+  구현하겠습니다:
+
+● Orchestrator 평가에 시간 측정을 추가합니다:
+
+● Update(src/cua2_core/services/vlm_agent_runner.py)
+  ⎿  Updated src/cua2_core/services/vlm_agent_runner.py with 15 additions  
+     and 1 removal
+       467    
+       468                # Orchestrator 스텝 평가 (연동된 경우)
+       469                if self._orchestrator and self._workflow_id and
+              self._node_id:
+       470 +                  eval_start = time.time()
+       471                    feedback = 
+             self._orchestrator.evaluate_step(
+       472                        workflow_id=self._workflow_id,
+       473                        node_id=self._node_id,
+     ...
+       475                        action=action_sequence,
+       476                        observation=observation,
+       477                    )
+       478 +                  eval_time_ms = int((time.time() - 
+           + eval_start) * 1000)
+       479    
+       480 +                  # 평가 결과 로그 (시간 포함)
+       481 +                  logger.info(
+       482 +                      f"[Orchestrator] 스텝 {step_number} 
+           + 평가: "
+       483 +                      f"action={feedback.action.value}, "
+       484 +                      f"reason='{feedback.reason}', "
+       485 +                      f"eval_time={eval_time_ms}ms"
+       486 +                  )
+       487 +  
+       488                    # 피드백에 따른 처리
+       489                    if feedback.action == StepAction.STOP:
+       490                        logger.error(f"[Orchestrator] 스텝 중단
+              지시: {feedback.reason}")
+     ...
+       489                            self._injected_prompt = 
+             feedback.injected_prompt
+       490                            logger.info(f"[Orchestrator] 
+             프롬프트 주입 예약: {feedback.injected_prompt[:50]}...")
+       491    
+       492 -                  # 학습
+       492 +                  # 학습 (시간 측정)
+       493 +                  learn_start = time.time()
+       494                    self._orchestrator.learn_from_step(
+       495                        node_id=self._node_id,
+       496                        step_number=step_number,
+     ...
+       498                        action=action_sequence,
+       499                        observation=observation,
+       500                    )
+       501 +                  learn_time_ms = int((time.time() - 
+           + learn_start) * 1000)
+       502 +                  if learn_time_ms > 10:  # 10ms 이상일 때만 
+           + 로그
+       503 +                      logger.debug(f"[Orchestrator] 학습 
+           + 저장: {learn_time_ms}ms")
+       504    
+       505                # 현재 상태 저장 (외부에서 조회용)
+       506                self._current_thought = thought
+
+● 이제 버전 관리 시스템을 Orchestrator에 추가합니다:
+
+● Update(src/cua2_core/services/orchestrator_service.py)
+  ⎿  Updated src/cua2_core/services/orchestrator_service.py with 6 addition
+
+       12    
+       13    import json
+       14    import logging
+       15 +  import os
+       16    import time
+       17    from dataclasses import dataclass, field
+       18 +  from datetime import datetime
+       19    from enum import Enum
+       20    from typing import Any, Callable, Dict, List, Optional, 
+            Tuple
+       21    
+       22    import httpx
+       23    
+       24 +  # 버전 정보
+       25 +  ORCHESTRATOR_VERSION = "1.1.0"
+       26 +  ORCHESTRATOR_VERSION_DATE = "2025-11-29"
+       27 +  
+       28    from .trace_store import get_trace_store, TraceStore
+       29    from .node_reuse_analyzer import get_node_reuse_analyzer, 
+            NodeReuseAnalyzer, ReuseDecision
+       30    from .agent_activity_log import (
+
+● 이제 Orchestrator 클래스에 버전 관리와 개선 이력 추적 기능을 추가합니다:
+
+● Read(src/cua2_core/services/orchestrator_service.py)
+  ⎿  Read 50 lines
+
+● Read(src/cua2_core/services/orchestrator_service.py)
+  ⎿  Read 40 lines
+
+● Update(src/cua2_core/services/orchestrator_service.py)
+  ⎿  Updated src/cua2_core/services/orchestrator_service.py with 115       
+     additions
+       298            # 워크플로우 실행 추적
+       299            self._workflow_executions: Dict[str, Dict[str, 
+             Any]] = {}
+       300    
+       301 +          # 버전 관리 및 개선 이력
+       302 +          self._version = ORCHESTRATOR_VERSION
+       303 +          self._version_date = ORCHESTRATOR_VERSION_DATE
+       304 +          self._improvement_history: List[Dict[str, Any]] = 
+           + []
+       305 +          self._pattern_versions: Dict[str, int] = {}  # 
+           + 패턴별 버전
+       306 +  
+       307 +          # 개선 이력 로드
+       308 +          self._load_improvement_history()
+       309 +  
+       310 +          logger.info(
+       311 +              f"[Orchestrator] 초기화 v{self._version} 
+           + ({self._version_date}), "
+       312 +              f"개선 이력 {len(self._improvement_history)}건"
+       313 +          )
+       314 +  
+       315 +      def _get_data_dir(self) -> str:
+       316 +          """데이터 디렉토리 반환"""
+       317 +          data_dir = os.path.join(os.path.expanduser("~"), 
+           + ".cua2", "orchestrator")
+       318 +          os.makedirs(data_dir, exist_ok=True)
+       319 +          return data_dir
+       320 +  
+       321 +      def _load_improvement_history(self):
+       322 +          """개선 이력 로드"""
+       323 +          history_file = os.path.join(self._get_data_dir(), 
+           + "improvement_history.json")
+       324 +          if os.path.exists(history_file):
+       325 +              try:
+       326 +                  with open(history_file, "r", 
+           + encoding="utf-8") as f:
+       327 +                      data = json.load(f)
+       328 +                      self._improvement_history = 
+           + data.get("history", [])
+       329 +                      self._pattern_versions = 
+           + data.get("pattern_versions", {})
+       330 +                      # 학습된 패턴도 로드
+       331 +                      self._step_patterns = 
+           + data.get("step_patterns", {})
+       332 +                      logger.info(f"[Orchestrator] 개선 이력 
+           + 로드: {len(self._improvement_history)}건")
+       333 +              except Exception as e:
+       334 +                  logger.warning(f"[Orchestrator] 개선 이력 
+           + 로드 실패: {e}")
+       335 +  
+       336 +      def _save_improvement_history(self):
+       337 +          """개선 이력 저장"""
+       338 +          history_file = os.path.join(self._get_data_dir(), 
+           + "improvement_history.json")
+       339 +          try:
+       340 +              with open(history_file, "w", encoding="utf-8") 
+           + as f:
+       341 +                  json.dump({
+       342 +                      "version": self._version,
+       343 +                      "last_updated": 
+           + datetime.now().isoformat(),
+       344 +                      "history": 
+           + self._improvement_history[-100:],  # 최근 100건만 유지
+       345 +                      "pattern_versions": 
+           + self._pattern_versions,
+       346 +                      "step_patterns": self._step_patterns,
+       347 +                  }, f, ensure_ascii=False, indent=2)
+       348 +          except Exception as e:
+       349 +              logger.warning(f"[Orchestrator] 개선 이력 저장 
+           + 실패: {e}")
+       350 +  
+       351 +      def record_improvement(
+       352 +          self,
+       353 +          improvement_type: str,
+       354 +          description: str,
+       355 +          details: Optional[Dict[str, Any]] = None,
+       356 +          node_id: Optional[str] = None,
+       357 +      ):
+       358 +          """
+       359 +          개선 사항 기록
+       360 +  
+       361 +          Args:
+       362 +              improvement_type: 개선 유형 (pattern_added, 
+           + prompt_updated, strategy_changed 등)
+       363 +              description: 개선 설명
+       364 +              details: 추가 상세 정보
+       365 +              node_id: 관련 노드 ID
+       366 +          """
+       367 +          entry = {
+       368 +              "timestamp": datetime.now().isoformat(),
+       369 +              "version": self._version,
+       370 +              "type": improvement_type,
+       371 +              "description": description,
+       372 +              "node_id": node_id,
+       373 +              "details": details or {},
+       374 +          }
+       375 +  
+       376 +          self._improvement_history.append(entry)
+       377 +  
+       378 +          # 패턴 버전 업데이트
+       379 +          if node_id:
+       380 +              self._pattern_versions[node_id] = 
+           + self._pattern_versions.get(node_id, 0) + 1
+       381 +  
+       382 +          logger.info(f"[Orchestrator] 개선 기록: 
+           + {improvement_type} - {description}")
+       383 +  
+       384 +          # 자동 저장
+       385 +          self._save_improvement_history()
+       386 +  
+       387 +      def get_version_info(self) -> Dict[str, Any]:
+       388 +          """버전 정보 반환"""
+       389 +          return {
+       390 +              "version": self._version,
+       391 +              "version_date": self._version_date,
+       392 +              "total_improvements": 
+           + len(self._improvement_history),
+       393 +              "patterns_learned": len(self._step_patterns) if
+           +  hasattr(self, '_step_patterns') else 0,
+       394 +              "recent_improvements": 
+           + self._improvement_history[-5:] if self._improvement_history 
+           + else [],
+       395 +          }
+       396 +  
+       397 +      def get_improvement_summary(self) -> str:
+       398 +          """개선 이력 요약 반환"""
+       399 +          if not self._improvement_history:
+       400 +              return "개선 이력 없음"
+       401 +  
+       402 +          summary_lines = [
+       403 +              f"Orchestrator v{self._version} 
+           + ({self._version_date})",
+       404 +              f"총 개선: {len(self._improvement_history)}건",
+       405 +              "",
+       406 +              "최근 개선:",
+       407 +          ]
+       408 +  
+       409 +          for entry in self._improvement_history[-5:]:
+       410 +              summary_lines.append(
+       411 +                  f"  - [{entry['type']}] 
+           + {entry['description']} ({entry['timestamp'][:10]})"
+       412 +              )
+       413 +  
+       414 +          return "\n".join(summary_lines)
+       415 +  
+       416        def decide(
+       417            self,
+       418            workflow_id: str,
+
+● 이제 learn_from_step에서 개선 이력을 기록하도록 수정합니다:
+
+● Search(pattern: "def learn_from_step", path:
+        "src/cua2_core/services/orchestrator_service.py", output_mode:
+        "content")
+  ⎿  Found 1 line (ctrl+o to expand)
+
+● Read(src/cua2_core/services/orchestrator_service.py)
+  ⎿  Read 50 lines
+
+● Update(src/cua2_core/services/orchestrator_service.py)
+  ⎿  Updated src/cua2_core/services/orchestrator_service.py with 18        
+     additions and 1 removal
+       1377                "timestamp": time.time(),
+       1378            }
+       1379    
+       1380 -          # 실패한 경우 힌트 추가
+       1380 +          # 실패한 경우 힌트 추가 및 개선 기록
+       1381            if not success and action:
+       1382                pattern_entry["hint"] = f"이전에 
+              '{action[:30]}' 액션이 실패했습니다. 다른 방법을 
+              시도하세요."
+       1383    
+       1384 +              # 개선 이력에 실패 패턴 기록
+       1385 +              self.record_improvement(
+       1386 +                  
+            + improvement_type="failure_pattern_learned",
+       1387 +                  description=f"스텝 {step_number} 실패 
+            + 학습: {action[:30]}",
+       1388 +                  details={
+       1389 +                      "step_number": step_number,
+       1390 +                      "action": action[:50] if action else 
+            + None,
+       1391 +                      "keywords": 
+            + pattern_entry["context_keywords"][:5],
+       1392 +                  },
+       1393 +                  node_id=node_id,
+       1394 +              )
+       1395 +  
+       1396            self._step_patterns[node_id].append(pattern_entry)
+       1397    
+       1398            # 최대 20개 패턴만 유지
+     ...
+       1389    
+       1390            logger.debug(f"[Orchestrator] 학습 저장: {node_id}
+               스텝 {step_number} (success={success})")
+       1391    
+       1392 +          # 주기적으로 저장 (10개 패턴마다)
+       1393 +          total_patterns = sum(len(p) for p in 
+            + self._step_patterns.values())
+       1394 +          if total_patterns % 10 == 0:
+       1395 +              self._save_improvement_history()
+       1396 +  
+       1397        def _extract_action_type(self, action: Optional[str]) 
+              -> Optional[str]:
+       1398            """액션에서 타입 추출"""
+       1399            if not action:
+
+● 이제 CoupangWorkflow에 통합하겠습니다:
+
+● Read(src/cua2_core/workflows/coupang_workflow.py)
+  ⎿  Read 100 lines
+  ⎿  5-hour limit reached · resets 12pm (Asia/Seoul) · /upgrade to Max 20x or 
+     turn on /extra-usage
+     /upgrade to increase your usage limit.
+
+
+

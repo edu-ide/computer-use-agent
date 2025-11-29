@@ -44,6 +44,10 @@ class WorkflowNode:
     node_type: Optional[str] = None  # 노드 타입: start, process, condition, end, error, vlm
     instruction: Optional[str] = None  # VLM 에이전트 명령 (시스템 프롬프트)
 
+    # 시간 설정
+    timeout_sec: int = 120  # 작업 제한시간 (초), 기본 2분
+    avg_duration_sec: Optional[int] = None  # 평균 작업 시간 (초), 학습된 값
+
     # 재사용 및 메모리 설정
     reusable: bool = False  # 이 노드의 trace를 재사용 가능하게 저장할지
     reuse_trace: bool = False  # 이전 trace를 재사용할지 (같은 입력일 때)
@@ -79,6 +83,7 @@ class WorkflowState(TypedDict, total=False):
     """워크플로우 상태 - LangGraph StateGraph용"""
     # 기본 상태
     workflow_id: str
+    execution_id: str  # 실행 ID (예: coupang-collect-20251129092555)
     status: str  # pending, running, completed, failed, stopped
     current_node: Optional[str]
 
@@ -90,6 +95,7 @@ class WorkflowState(TypedDict, total=False):
     # 시간 정보
     start_time: Optional[str]
     end_time: Optional[str]
+    current_node_start_time: Optional[str]  # 현재 노드 시작 시간
 
     # 사용자 입력 파라미터
     parameters: Dict[str, Any]
@@ -196,13 +202,16 @@ class WorkflowBase(ABC):
                 }
 
             # 현재 노드 설정 (즉시 _current_state 업데이트하여 WebSocket에서 바로 조회 가능하게)
+            current_node_start_time = datetime.now().isoformat()
             if self._current_state is not None:
                 self._current_state["current_node"] = node_name
                 self._current_state["status"] = "running"
+                self._current_state["current_node_start_time"] = current_node_start_time
 
             state_update = {
                 "current_node": node_name,
                 "status": "running",
+                "current_node_start_time": current_node_start_time,
             }
 
             try:
@@ -374,9 +383,20 @@ class WorkflowBase(ABC):
             self._graph = self.build_graph()
             self._app = self._graph.compile(checkpointer=self._checkpointer)
 
+        # 실행 ID 설정
+        # workflow_registry에서 execution_id를 thread_id로 전달 (예: "coupang-collect-20251129092555")
+        # thread_id가 이미 workflow_id를 포함하면 그대로 사용
+        if thread_id.startswith(self.config.id):
+            execution_id = thread_id  # 이미 완전한 execution_id
+        elif thread_id != "default":
+            execution_id = f"{self.config.id}-{thread_id}"  # 타임스탬프만 있는 경우
+        else:
+            execution_id = self.config.id  # 기본값
+
         # 초기 상태
         initial_state: WorkflowState = {
             "workflow_id": self.config.id,
+            "execution_id": execution_id,  # 실행별 고유 ID
             "status": "running",
             "current_node": None,
             "completed_nodes": [],
@@ -458,6 +478,10 @@ class WorkflowBase(ABC):
                 node_data["type"] = node.node_type
             if node.instruction:
                 node_data["instruction"] = node.instruction
+
+            # 시간 설정 추가
+            node_data["timeout_sec"] = node.timeout_sec
+            node_data["avg_duration_sec"] = node.avg_duration_sec
 
             # 재사용/메모리 설정 추가
             node_data["reusable"] = node.reusable

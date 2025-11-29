@@ -6,7 +6,8 @@ import path from "path";
 export default defineConfig(({ mode }) => ({
   server: {
     host: "::",
-    port: 8080,
+    port: 3000,  // 8080, 8081은 llama.cpp 서버용으로 예약
+    strictPort: false,  // 포트 사용 중이면 다음 포트 시도
   },
   plugins: [react()],
   resolve: {

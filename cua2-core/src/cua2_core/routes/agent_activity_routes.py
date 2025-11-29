@@ -177,7 +177,8 @@ async def execution_activities_websocket(websocket: WebSocket, execution_id: str
         await websocket.send_json({
             "type": "init",
             "execution_id": execution_id,
-            "activities": log.get_logs(limit=50, execution_id=execution_id),
+            "agents": log.get_agent_status(),
+            "recent_activities": log.get_logs(limit=50, execution_id=execution_id),
         })
 
         # 연결 유지

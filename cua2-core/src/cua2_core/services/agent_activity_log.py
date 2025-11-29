@@ -30,6 +30,7 @@ class ActivityType(Enum):
     CACHE_MISS = "cache_miss"  # 캐시 미스
     API_CALL = "api_call"  # API 호출
     ERROR = "error"  # 에러
+    WARNING = "warning"  # 경고
     INFO = "info"  # 정보
 
 

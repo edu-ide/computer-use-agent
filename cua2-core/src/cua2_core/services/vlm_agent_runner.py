@@ -21,6 +21,11 @@ from cua2_core.services.agent_utils.function_parser import parse_function_call
 from cua2_core.services.local_sandbox_service import LocalSandboxService
 from cua2_core.services.utils import compress_image_to_max_size
 from cua2_core.services.trace_store import get_trace_store
+from cua2_core.services.orchestrator_service import (
+    OrchestratorService,
+    StepAction,
+    StepFeedback,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +41,8 @@ class VLMStepLog:
     observation: Optional[str] = None
     error: Optional[str] = None
     tool_calls: List[Dict[str, Any]] = field(default_factory=list)
+    orchestrator_feedback: Optional[Dict[str, Any]] = None
+    duration_ms: Optional[int] = None
 
 
 @dataclass
@@ -45,11 +52,30 @@ class VLMInstructionResult:
     data: Dict[str, Any] = field(default_factory=dict)
     error: Optional[str] = None
     steps: List[VLMStepLog] = field(default_factory=list)
+    # 에러 추적
+    consecutive_errors: int = 0  # 연속 에러 횟수
+    early_stopped: bool = False  # 얼리 스탑 여부
+    early_stop_reason: Optional[str] = None  # 얼리 스탑 사유
 
 
 class AgentStopException(Exception):
     """에이전트 중지 예외"""
     pass
+
+
+class EarlyStopException(Exception):
+    """연속 에러로 인한 얼리 스탑 예외"""
+    def __init__(self, message: str, consecutive_errors: int, last_error: str):
+        super().__init__(message)
+        self.consecutive_errors = consecutive_errors
+        self.last_error = last_error
+
+
+class BotDetectionException(Exception):
+    """봇 감지로 인한 즉시 중단 예외"""
+    def __init__(self, message: str, detected_pattern: str):
+        super().__init__(message)
+        self.detected_pattern = detected_pattern
 
 
 class VLMAgentRunner:
@@ -59,15 +85,78 @@ class VLMAgentRunner:
     LocalAgentService의 핵심 로직을 워크플로우에서 사용할 수 있도록 추상화
     """
 
+    # 얼리 스탑 설정
+    MAX_CONSECUTIVE_ERRORS = 3  # 연속 에러 허용 횟수
+
+    # 봇 감지 패턴 (이 패턴이 thought/observation에 있으면 즉시 중단)
+    BOT_DETECTION_PATTERNS = [
+        "access denied",
+        "액세스 거부",
+        "접근이 거부",
+        "접근 거부",
+        "bot detected",
+        "봇이 감지",
+        "captcha",
+        "캡차",
+        "robot",
+        "로봇이 아닙니다",
+        "are you a robot",
+        "unusual traffic",
+        "비정상적인 트래픽",
+        "too many requests",
+        "rate limit",
+        "blocked",
+        "차단되었습니다",
+        "forbidden",
+        "403",
+        "please verify you are a human",
+        "human verification",
+    ]
+
+    # 실패 패턴 (final_answer나 observation에서 실패를 나타내는 패턴)
+    FAILURE_PATTERNS = [
+        "could not be loaded",
+        "로드할 수 없",
+        "로딩 실패",
+        "failed to load",
+        "screen is black",
+        "screen remains black",
+        "검은 화면",
+        "화면이 검",
+        "page not found",
+        "페이지를 찾을 수 없",
+        "connection refused",
+        "연결 거부",
+        "timeout",
+        "타임아웃",
+        "network error",
+        "네트워크 오류",
+        "unable to",
+        "cannot access",
+        "접근할 수 없",
+        "not visible",
+        "보이지 않",
+        "profile cannot be loaded",
+        "프로필을 로드할 수 없",
+    ]
+
     def __init__(
         self,
         model_id: str = "local-qwen3-vl",
         max_steps: int = 15,
         data_dir: Optional[str] = None,
+        max_consecutive_errors: int = 3,  # 연속 에러 허용 횟수
+        agent_type: str = "vlm",  # "vlm" 또는 "web" - web이면 봇 감지 체크 활성화
+        check_bot_detection: bool = True,  # 봇 감지 체크 활성화 여부
+        orchestrator: Optional[OrchestratorService] = None,  # Orchestrator 연동
     ):
         self.model_id = model_id
         self.max_steps = max_steps
         self.data_dir = data_dir or "/tmp/vlm_agent_runner"
+        self.max_consecutive_errors = max_consecutive_errors
+        self.agent_type = agent_type
+        self.check_bot_detection = check_bot_detection
+        self._orchestrator = orchestrator
 
         self._sandbox_service = LocalSandboxService(max_sandboxes=1)
         self._current_sandbox = None
@@ -76,6 +165,48 @@ class VLMAgentRunner:
         self._steps: List[VLMStepLog] = []
         self._last_screenshot: Optional[tuple[Image.Image, str]] = None
         self._should_stop = False
+
+        # Orchestrator 컨텍스트
+        self._workflow_id: Optional[str] = None
+        self._node_id: Optional[str] = None
+        self._injected_prompt: Optional[str] = None  # 다음 스텝에 주입할 프롬프트
+        self._pending_memory_save: Optional[Dict[str, str]] = None  # 메모리 저장 대기
+
+        # 연속 에러 추적
+        self._consecutive_errors: int = 0
+        self._last_error: Optional[str] = None
+        self._current_action: Optional[str] = None
+        self._current_observation: Optional[str] = None
+        self._current_thought: Optional[str] = None
+
+    def _check_bot_detection(self, thought: Optional[str], observation: Optional[str]) -> Optional[str]:
+        """봇 감지 패턴 체크 - 감지되면 패턴 반환, 아니면 None"""
+        if not self.check_bot_detection:
+            return None
+
+        text_to_check = ""
+        if thought:
+            text_to_check += thought.lower()
+        if observation:
+            text_to_check += " " + observation.lower()
+
+        for pattern in self.BOT_DETECTION_PATTERNS:
+            if pattern.lower() in text_to_check:
+                return pattern
+
+        return None
+
+    def _check_failure_pattern(self, text: Optional[str]) -> Optional[str]:
+        """실패 패턴 체크 - 감지되면 패턴 반환, 아니면 None"""
+        if not text:
+            return None
+
+        text_lower = text.lower()
+        for pattern in self.FAILURE_PATTERNS:
+            if pattern.lower() in text_lower:
+                return pattern
+
+        return None
 
     async def initialize(self, session_id: str) -> bool:
         """샌드박스와 에이전트 초기화"""
@@ -204,6 +335,29 @@ class VLMAgentRunner:
         self._steps = []
         step_number = 0
 
+        # Orchestrator 컨텍스트 설정
+        self._workflow_id = workflow_id
+        self._node_id = node_id
+        self._injected_prompt = None
+        self._pending_memory_save = None
+
+        # 연속 에러 카운트 초기화
+        self._consecutive_errors = 0
+        self._last_error = None
+        self._current_thought = None
+        self._current_action = None
+        self._current_observation = None
+
+        # Orchestrator로부터 동적 시스템 프롬프트 생성
+        final_instruction = instruction
+        if self._orchestrator and node_id:
+            final_instruction = self._orchestrator.get_dynamic_system_prompt(
+                node_id=node_id,
+                base_instruction=instruction,
+                step_number=0,
+            )
+            logger.info(f"[Orchestrator] 동적 프롬프트 적용 (원본 {len(instruction)}자 → {len(final_instruction)}자)")
+
         # 초기 스크린샷
         try:
             screenshot_image = self._current_agent.desktop.screenshot()
@@ -212,8 +366,16 @@ class VLMAgentRunner:
         except Exception as e:
             logger.error(f"초기 스크린샷 실패: {e}")
 
+        # Timing tracking
+        last_step_time = time.time()
+
         def step_callback(memory_step: ActionStep, agent: LocalVisionAgent):
-            nonlocal step_number
+            nonlocal step_number, last_step_time
+
+            # Calculate duration
+            current_time = time.time()
+            step_duration_ms = int((current_time - last_step_time) * 1000)
+            last_step_time = current_time
 
             if memory_step.step_number is None:
                 return
@@ -236,12 +398,21 @@ class VLMAgentRunner:
             if isinstance(memory_step.error, AgentMaxStepsError):
                 model_output = memory_step.action_output
 
-            # Thought 추출
+            # Thought 추출 (여러 형식 지원)
             thought = None
             if model_output and (
                 memory_step.error is None or isinstance(memory_step.error, AgentMaxStepsError)
             ):
-                thought = model_output.split("```")[0].replace("\nAction:\n", "").strip()
+                # ```로 분리된 경우
+                if "```" in model_output:
+                    thought = model_output.split("```")[0].replace("\nAction:\n", "").strip()
+                else:
+                    # ```가 없으면 전체를 thought로
+                    thought = model_output.strip()
+
+                # thought가 비어있으면 전체 출력 사용
+                if not thought and model_output:
+                    thought = model_output[:500]  # 최대 500자
 
             # Action 추출
             action_sequence = None
@@ -249,6 +420,9 @@ class VLMAgentRunner:
                 parts = model_output.split("```")
                 if len(parts) > 1:
                     action_sequence = parts[1]
+                    # action이 비어있으면 다음 부분 시도
+                    if not action_sequence.strip() and len(parts) > 2:
+                        action_sequence = parts[2]
 
             # 스크린샷 처리
             time.sleep(2)  # 액션 후 대기
@@ -263,6 +437,111 @@ class VLMAgentRunner:
                 except Exception as e:
                     logger.error(f"스크린샷 인코딩 오류: {e}")
 
+            # 에러 추적 및 얼리 스탑핑 체크
+            step_error = memory_step.error.message if memory_step.error else None
+
+            if step_error:
+                self._consecutive_errors += 1
+                self._last_error = step_error
+                logger.warning(f"[EarlyStop] 에러 발생 ({self._consecutive_errors}/{self.max_consecutive_errors}): {step_error}")
+
+                # 연속 에러 임계값 도달 시 얼리 스탑
+                if self._consecutive_errors >= self.max_consecutive_errors:
+                    logger.error(f"[EarlyStop] 연속 {self._consecutive_errors}회 에러 발생, 얼리 스탑핑!")
+                    raise EarlyStopException(
+                        f"연속 {self._consecutive_errors}회 에러 발생으로 중단",
+                        consecutive_errors=self._consecutive_errors,
+                        last_error=self._last_error,
+                    )
+            else:
+                # 성공 시 연속 에러 카운트 리셋
+                if self._consecutive_errors > 0:
+                    logger.info(f"[EarlyStop] 에러 복구, 연속 에러 카운트 리셋 (이전: {self._consecutive_errors})")
+                self._consecutive_errors = 0
+
+            # Observation 추출 (여러 속성 시도)
+            observation = None
+            if hasattr(memory_step, 'action_output') and memory_step.action_output:
+                observation = str(memory_step.action_output)
+            elif hasattr(memory_step, 'observations') and memory_step.observations:
+                observation = str(memory_step.observations)
+            elif hasattr(memory_step, 'tool_result') and memory_step.tool_result:
+                observation = str(memory_step.tool_result)
+
+            # 봇 감지 체크 (WebAgent 모드에서만)
+            detected_pattern = self._check_bot_detection(thought, observation)
+            if detected_pattern:
+                logger.error(f"[BotDetection] 봇 감지됨! 패턴: '{detected_pattern}'")
+                raise BotDetectionException(
+                    f"봇 감지로 인해 즉시 중단 (패턴: {detected_pattern})",
+                    detected_pattern=detected_pattern,
+                )
+
+            # Orchestrator 스텝 평가 (연동된 경우)
+            step_feedback_dict = None
+            if self._orchestrator and self._workflow_id and self._node_id:
+                eval_start = time.time()
+                feedback = self._orchestrator.evaluate_step(
+                    workflow_id=self._workflow_id,
+                    node_id=self._node_id,
+                    step_number=step_number,
+                    thought=thought,
+                    action=action_sequence,
+                    observation=observation,
+                )
+                eval_time_ms = int((time.time() - eval_start) * 1000)
+
+                # 피드백을 dict로 변환하여 저장
+                step_feedback_dict = {
+                    "action": feedback.action.value,
+                    "reason": feedback.reason,
+                    "injected_prompt": feedback.injected_prompt,
+                    "learned_pattern": feedback.learned_pattern,
+                    "next_step_hint": feedback.next_step_hint,
+                }
+
+                # 평가 결과 로그 (시간 포함)
+                logger.info(
+                    f"[Orchestrator] 스텝 {step_number} 평가: "
+                    f"action={feedback.action.value}, "
+                    f"reason='{feedback.reason}', "
+                    f"eval_time={eval_time_ms}ms"
+                )
+
+                # 피드백에 따른 처리
+                if feedback.action == StepAction.STOP:
+                    logger.error(f"[Orchestrator] 스텝 중단 지시: {feedback.reason}")
+                    if feedback.save_to_memory:
+                        self._pending_memory_save = feedback.save_to_memory
+                    raise BotDetectionException(
+                        f"Orchestrator 중단: {feedback.reason}",
+                        detected_pattern=feedback.learned_pattern or "unknown",
+                    )
+                elif feedback.action == StepAction.INJECT_PROMPT:
+                    # 다음 스텝에 프롬프트 주입 예약
+                    if feedback.injected_prompt:
+                        self._injected_prompt = feedback.injected_prompt
+                        logger.info(f"[Orchestrator] 프롬프트 주입 예약: {feedback.injected_prompt[:50]}...")
+
+                # 학습 (시간 측정)
+                learn_start = time.time()
+                self._orchestrator.learn_from_step(
+                    node_id=self._node_id,
+                    step_number=step_number,
+                    success=step_error is None,
+                    thought=thought,
+                    action=action_sequence,
+                    observation=observation,
+                )
+                learn_time_ms = int((time.time() - learn_start) * 1000)
+                if learn_time_ms > 10:  # 10ms 이상일 때만 로그
+                    logger.debug(f"[Orchestrator] 학습 저장: {learn_time_ms}ms")
+
+            # 현재 상태 저장 (외부에서 조회용)
+            self._current_thought = thought
+            self._current_action = action_sequence
+            self._current_observation = observation
+
             # 스텝 로그 생성
             step_log = VLMStepLog(
                 step_number=step_number,
@@ -270,9 +549,11 @@ class VLMAgentRunner:
                 screenshot=screenshot_base64,
                 thought=thought,
                 action=action_sequence,
-                observation=memory_step.action_output if hasattr(memory_step, 'action_output') else None,
-                error=memory_step.error.message if memory_step.error else None,
+                observation=observation,
+                error=step_error,
                 tool_calls=parse_function_call(action_sequence) if action_sequence else [],
+                orchestrator_feedback=step_feedback_dict,
+                duration_ms=step_duration_ms,
             )
 
             self._steps.append(step_log)
@@ -302,17 +583,37 @@ class VLMAgentRunner:
         result: Optional[VLMInstructionResult] = None
 
         try:
-            # 에이전트 실행
-            await asyncio.wait_for(
-                asyncio.to_thread(self._current_agent.run, instruction),
+            # 에이전트 실행 (동적 프롬프트 적용)
+            agent_result = await asyncio.wait_for(
+                asyncio.to_thread(self._current_agent.run, final_instruction),
                 timeout=600,  # 10분 타임아웃
             )
 
-            result = VLMInstructionResult(
-                success=True,
-                data={"steps_count": len(self._steps)},
-                steps=self._steps,
-            )
+            # final_answer 결과에서 실패 패턴 체크
+            final_answer_text = str(agent_result) if agent_result else ""
+            failure_pattern = self._check_failure_pattern(final_answer_text)
+
+            # 마지막 observation에서도 실패 패턴 체크
+            if not failure_pattern and self._steps:
+                last_obs = self._steps[-1].observation
+                failure_pattern = self._check_failure_pattern(last_obs)
+
+            if failure_pattern:
+                logger.warning(f"[FailurePattern] 실패 패턴 감지: '{failure_pattern}' in '{final_answer_text[:100]}...'")
+                result = VLMInstructionResult(
+                    success=False,
+                    error=f"실패 패턴 감지: {failure_pattern}",
+                    data={"steps_count": len(self._steps), "final_answer": final_answer_text},
+                    steps=self._steps,
+                    early_stopped=True,
+                    early_stop_reason=f"실패 패턴 감지: {failure_pattern}",
+                )
+            else:
+                result = VLMInstructionResult(
+                    success=True,
+                    data={"steps_count": len(self._steps), "final_answer": final_answer_text},
+                    steps=self._steps,
+                )
 
         except asyncio.TimeoutError:
             logger.error("에이전트 실행 타임아웃")
@@ -336,6 +637,41 @@ class VLMAgentRunner:
                     error=reason,
                     steps=self._steps,
                 )
+
+        except EarlyStopException as e:
+            logger.error(f"[EarlyStop] 얼리 스탑 발생: {e}")
+            result = VLMInstructionResult(
+                success=False,
+                error=str(e),
+                steps=self._steps,
+                consecutive_errors=e.consecutive_errors,
+                early_stopped=True,
+                early_stop_reason=f"연속 {e.consecutive_errors}회 에러: {e.last_error}",
+            )
+
+        except BotDetectionException as e:
+            logger.error(f"[BotDetection] 봇 감지로 즉시 중단: {e}")
+
+            # Save failure pattern to memory if requested
+            if self._pending_memory_save and self._orchestrator and self._workflow_id and self._node_id:
+                try:
+                    await self._orchestrator.save_failure_to_memory(
+                        self._workflow_id,
+                        self._node_id,
+                        self._pending_memory_save["pattern"],
+                        self._pending_memory_save["reason"]
+                    )
+                    logger.info(f"[Memory] 실패 패턴 저장됨: {self._pending_memory_save}")
+                except Exception as me:
+                    logger.warning(f"[Memory] 실패 패턴 저장 실패: {me}")
+
+            result = VLMInstructionResult(
+                success=False,
+                error=str(e),
+                steps=self._steps,
+                early_stopped=True,
+                early_stop_reason=f"봇 감지: {e.detected_pattern}",
+            )
 
         except Exception as e:
             import traceback
@@ -423,3 +759,15 @@ class VLMAgentRunner:
             except Exception:
                 pass
         return None
+
+    def get_current_state(self) -> Dict[str, Any]:
+        """현재 에이전트 상태 반환 (실시간 모니터링용)"""
+        return {
+            "consecutive_errors": self._consecutive_errors,
+            "last_error": self._last_error,
+            "current_thought": self._current_thought,
+            "current_action": self._current_action,
+            "current_observation": self._current_observation,
+            "step_count": len(self._steps),
+            "max_consecutive_errors": self.max_consecutive_errors,
+        }

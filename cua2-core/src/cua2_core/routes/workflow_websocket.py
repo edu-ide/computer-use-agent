@@ -119,11 +119,15 @@ async def workflow_websocket_endpoint(websocket: WebSocket, execution_id: str):
                         step_with_node = {**step, "node_id": node_id}
                         all_steps.append(step_with_node)
 
-            # 스크린샷은 마지막 스텝에서만
+            # 스크린샷 및 현재 에이전트 상태 조회
             from cua2_core.routes.workflow_routes import _active_agent_runners
             last_screenshot = None
+            agent_state = None
             if execution_id in _active_agent_runners:
-                last_screenshot = _active_agent_runners[execution_id].get_last_screenshot()
+                agent_runner = _active_agent_runners[execution_id]
+                last_screenshot = agent_runner.get_last_screenshot()
+                # 현재 에이전트 상태 (action, observation, 에러 정보)
+                agent_state = agent_runner.get_current_state()
 
             # 노드별 trace 다운로드 URL 생성
             node_traces = {}
@@ -150,6 +154,15 @@ async def workflow_websocket_endpoint(websocket: WebSocket, execution_id: str):
                 "all_steps": all_steps,
                 # 노드별 trace 다운로드 URL
                 "node_traces": node_traces,
+                # 현재 노드 상세 정보 (실시간 모니터링용)
+                "current_node_start_time": state.get("current_node_start_time"),
+                "current_thought": agent_state.get("current_thought") if agent_state else None,
+                "current_action": agent_state.get("current_action") if agent_state else None,
+                "current_observation": agent_state.get("current_observation") if agent_state else None,
+                "step_count": agent_state.get("step_count") if agent_state else None,
+                # 에러 추적 정보
+                "consecutive_errors": agent_state.get("consecutive_errors") if agent_state else None,
+                "last_error": agent_state.get("last_error") if agent_state else None,
             }
 
             # 디버깅: 상태 로깅

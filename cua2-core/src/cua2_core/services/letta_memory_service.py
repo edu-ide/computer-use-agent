@@ -114,6 +114,13 @@ class WorkflowMemoryConfig:
 - cache_key_params: 결과에 영향을 주는 파라미터 목록
 """,
                 ),
+                MemoryBlock(
+                    label="failure_patterns",
+                    description="학습된 치명적 실패 패턴. 노드별로 즉시 중단해야 할 에러 메시지나 상황을 기록합니다.",
+                    value="""## 실패 패턴 학습 데이터
+아직 학습된 패턴이 없습니다.
+""",
+                ),
             ],
         )
 
@@ -142,6 +149,7 @@ class LettaMemoryService:
         self._agents: Dict[str, str] = {}  # workflow_id -> agent_id
         self._fallback_mode = False
         self._fallback_memory: Dict[str, Dict[str, str]] = {}  # 로컬 폴백 메모리
+        self._load_fallback_memory()
 
         self._initialize_client()
 
@@ -167,6 +175,31 @@ class LettaMemoryService:
         except Exception as e:
             logger.warning(f"Letta 서버 연결 실패: {e}. 폴백 모드 사용.")
             self._fallback_mode = True
+
+    def _get_memory_file(self) -> str:
+        data_dir = os.path.join(os.path.expanduser("~"), ".cua2")
+        os.makedirs(data_dir, exist_ok=True)
+        return os.path.join(data_dir, "memory.json")
+
+    def _load_fallback_memory(self):
+        """메모리 파일 로드"""
+        try:
+            import json
+            file_path = self._get_memory_file()
+            if os.path.exists(file_path):
+                with open(file_path, "r", encoding="utf-8") as f:
+                    self._fallback_memory = json.load(f)
+        except Exception as e:
+            logger.warning(f"메모리 로드 실패: {e}")
+
+    def _save_fallback_memory(self):
+        """메모리 파일 저장"""
+        try:
+            import json
+            with open(self._get_memory_file(), "w", encoding="utf-8") as f:
+                json.dump(self._fallback_memory, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.warning(f"메모리 저장 실패: {e}")
 
     async def create_workflow_agent(
         self,
@@ -222,9 +255,13 @@ class LettaMemoryService:
     def _create_fallback_agent(self, config: WorkflowMemoryConfig) -> str:
         """폴백 모드에서 로컬 메모리로 에이전트 생성"""
         agent_id = f"fallback-{config.workflow_id}"
-        self._fallback_memory[agent_id] = {
-            block.label: block.value for block in config.initial_blocks
-        }
+        # 이미 로드된 메모리가 있으면 유지
+        if agent_id not in self._fallback_memory:
+            self._fallback_memory[agent_id] = {
+                block.label: block.value for block in config.initial_blocks
+            }
+            self._save_fallback_memory()
+
         self._agents[config.workflow_id] = agent_id
         logger.info(f"폴백 에이전트 생성: {agent_id}")
         return agent_id
@@ -305,6 +342,7 @@ Always keep your memory up-to-date so you can resume work efficiently.
         if self._fallback_mode or agent_id.startswith("fallback-"):
             if agent_id in self._fallback_memory:
                 self._fallback_memory[agent_id][block_label] = value
+                self._save_fallback_memory()
                 return True
             return False
 
@@ -446,6 +484,45 @@ Always keep your memory up-to-date so you can resume work efficiently.
     ) -> Optional[str]:
         """재사용 학습 데이터 조회"""
         return await self.get_memory_block(workflow_id, "reuse_learning")
+
+    async def add_failure_pattern(self, workflow_id: str, node_id: str, pattern: str, reason: str):
+        """실패 패턴 추가"""
+        current = await self.get_memory_block(workflow_id, "failure_patterns") or ""
+        
+        # 중복 체크
+        entry_start = f"- [{node_id}] {pattern}"
+        if entry_start in current:
+            return
+
+        new_entry = f"- [{node_id}] {pattern} (이유: {reason})"
+        
+        if "## 실패 패턴 학습 데이터" in current:
+            updated = current.replace(
+                "## 실패 패턴 학습 데이터\n",
+                f"## 실패 패턴 학습 데이터\n{new_entry}\n"
+            )
+        else:
+            updated = f"## 실패 패턴 학습 데이터\n{new_entry}\n"
+            
+        await self.update_memory_block(workflow_id, "failure_patterns", updated)
+
+    async def get_failure_patterns(self, workflow_id: str, node_id: str) -> List[str]:
+        """노드별 실패 패턴 조회"""
+        current = await self.get_memory_block(workflow_id, "failure_patterns") or ""
+        patterns = []
+        for line in current.split("\n"):
+            if line.startswith(f"- [{node_id}]"):
+                # Extract pattern from "- [node_id] pattern (reason)"
+                parts = line.split("] ", 1)
+                if len(parts) > 1:
+                    content = parts[1]
+                    # Remove reason part if exists
+                    if " (" in content:
+                        pattern = content.split(" (")[0]
+                    else:
+                        pattern = content
+                    patterns.append(pattern.strip())
+        return patterns
 
     async def update_node_reuse_settings(
         self,

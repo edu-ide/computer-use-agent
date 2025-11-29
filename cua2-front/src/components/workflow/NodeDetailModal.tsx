@@ -33,6 +33,8 @@ import {
   FiDatabase,
   FiDollarSign,
   FiShoppingBag,
+  FiDownload,
+  FiCpu,
 } from 'react-icons/fi';
 import { getApiBaseUrl } from '@/config/api';
 
@@ -44,6 +46,13 @@ interface NodeLog {
   thought?: string;
   observation?: string;
   tool_calls?: Array<{ name: string; args: Record<string, unknown> }>;
+  orchestrator_feedback?: {
+    action: string;
+    reason: string;
+    injected_prompt?: string;
+    learned_pattern?: string;
+    next_step_hint?: string;
+  };
 }
 
 interface ProductInfo {
@@ -106,6 +115,11 @@ const NodeDetailModal: React.FC<NodeDetailModalProps> = ({
       }
 
       const data = await response.json();
+      console.log('[NodeDetailModal] API 응답:', data);
+      console.log('[NodeDetailModal] logs:', data.logs);
+      if (data.logs?.length > 0) {
+        console.log('[NodeDetailModal] 첫번째 로그:', data.logs[0]);
+      }
       setLogs(data.logs || []);
       setStatus(data.status);
       setNodeError(data.error);
@@ -116,6 +130,51 @@ const NodeDetailModal: React.FC<NodeDetailModalProps> = ({
     } finally {
       setLoading(false);
     }
+  };
+
+  // Trace JSON 다운로드
+  const handleDownloadTrace = () => {
+    if (logs.length === 0) return;
+
+    const traceData = {
+      trace: {
+        id: `${executionId}-${nodeId}`,
+        timestamp: new Date().toISOString(),
+        nodeId: nodeId,
+        nodeName: nodeName,
+        executionId: executionId,
+      },
+      completion: {
+        status: status === 'success' ? 'success' : 'failure',
+        error: nodeError,
+      },
+      metadata: {
+        numberOfSteps: logs.length,
+        nodeType: nodeType,
+      },
+      steps: logs.map((log) => ({
+        stepNumber: log.step_number,
+        timestamp: log.timestamp,
+        screenshot: log.screenshot || null,
+        thought: log.thought || null,
+        action: log.action || null,
+        observation: log.observation || null,
+        toolCalls: log.tool_calls || [],
+      })),
+      nodeData: nodeData,
+      workflowData: workflowData,
+      exportedAt: new Date().toISOString(),
+    };
+
+    const blob = new Blob([JSON.stringify(traceData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `trace_${nodeId}_${executionId || 'unknown'}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -189,6 +248,18 @@ const NodeDetailModal: React.FC<NodeDetailModalProps> = ({
                 fontWeight: 600,
               }}
             />
+          )}
+          {logs.length > 0 && (
+            <IconButton
+              onClick={handleDownloadTrace}
+              sx={{
+                color: '#3b82f6',
+                '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.1)' },
+              }}
+              title="Trace JSON 다운로드"
+            >
+              <FiDownload size={20} />
+            </IconButton>
           )}
           <IconButton onClick={onClose} sx={{ color: '#64748b' }}>
             <CloseIcon />
@@ -430,9 +501,9 @@ const NodeDetailModal: React.FC<NodeDetailModalProps> = ({
 
             {/* 스텝 로그 */}
             {logs.length > 0 ? (
-              <Stepper orientation="vertical" activeStep={logs.length}>
+              <Stepper orientation="vertical" activeStep={-1} nonLinear>
                 {logs.map((log, index) => (
-                  <Step key={index} completed>
+                  <Step key={index} expanded active>
                     <StepLabel
                       StepIconComponent={() => (
                         <Box
@@ -469,6 +540,13 @@ const NodeDetailModal: React.FC<NodeDetailModalProps> = ({
                         }}
                       >
                         <CardContent>
+                          {/* 스텝 정보가 모두 비어있을 때 */}
+                          {!log.screenshot && !log.thought && !log.action && !log.observation && !log.tool_calls?.length && (
+                            <Typography variant="body2" sx={{ color: '#94a3b8', fontStyle: 'italic' }}>
+                              이 단계의 상세 정보가 기록되지 않았습니다.
+                            </Typography>
+                          )}
+
                           {/* 스크린샷 */}
                           {log.screenshot && (
                             <Box sx={{ mb: 2 }}>
@@ -583,6 +661,41 @@ const NodeDetailModal: React.FC<NodeDetailModalProps> = ({
                                   }}
                                 />
                               ))}
+                            </Box>
+                          )}
+
+                          {/* Orchestrator Feedback */}
+                          {log.orchestrator_feedback && (
+                            <Box sx={{ mt: 2, p: 1.5, bgcolor: '#f5f3ff', borderRadius: 1, border: '1px solid #ddd6fe' }}>
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                                <FiCpu size={14} color="#7c3aed" />
+                                <Typography variant="caption" sx={{ color: '#7c3aed', fontWeight: 700 }}>
+                                  Orchestrator 개입
+                                </Typography>
+                                <Chip 
+                                  label={log.orchestrator_feedback.action}
+                                  size="small"
+                                  sx={{ 
+                                    height: 20, 
+                                    fontSize: '10px', 
+                                    bgcolor: log.orchestrator_feedback.action === 'continue' ? '#ddd6fe' : '#fecaca',
+                                    color: log.orchestrator_feedback.action === 'continue' ? '#7c3aed' : '#dc2626'
+                                  }}
+                                />
+                              </Box>
+                              <Typography variant="body2" sx={{ color: '#5b21b6', fontSize: '13px' }}>
+                                {log.orchestrator_feedback.reason}
+                              </Typography>
+                              {log.orchestrator_feedback.injected_prompt && (
+                                <Box sx={{ mt: 1, p: 1, bgcolor: '#fff', borderRadius: 1, border: '1px dashed #a78bfa' }}>
+                                  <Typography variant="caption" sx={{ color: '#7c3aed', display: 'block', mb: 0.5 }}>
+                                    프롬프트 주입:
+                                  </Typography>
+                                  <Typography variant="caption" sx={{ color: '#4c1d95', fontFamily: 'monospace' }}>
+                                    {log.orchestrator_feedback.injected_prompt}
+                                  </Typography>
+                                </Box>
+                              )}
                             </Box>
                           )}
                         </CardContent>

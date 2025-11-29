@@ -43,6 +43,7 @@ from ..services.agent_activity_log import (
     log_memory,
     ActivityType,
 )
+from ..services.vlm_agent_runner import VLMStepLog
 from ..models.coupang_models import CoupangProduct
 
 
@@ -79,7 +80,11 @@ class CoupangCollectWorkflow(WorkflowBase):
 
         # Orchestrator 서비스 (실행 전략 결정)
         self._orchestrator: OrchestratorService = get_orchestrator_service()
-        self._use_orchestrator: bool = True  # Orchestrator 사용 여부
+        self._use_orchestrator: bool = True  # Orchestrator 사용 여부 (8081 서버 필요)
+
+        # VLMAgentRunner에 Orchestrator 주입 (Step-level intervention을 위해)
+        if self._agent_runner and hasattr(self._agent_runner, "_orchestrator") and self._agent_runner._orchestrator is None:
+            self._agent_runner._orchestrator = self._orchestrator
 
     def set_step_callback(self, callback: Callable):
         """스텝 콜백 설정 - 실시간 UI 업데이트용"""
@@ -247,10 +252,15 @@ class CoupangCollectWorkflow(WorkflowBase):
         return await self._letta.get_context_for_agent(self.config.id)
 
     async def _cleanup_letta_memory(self):
-        """워크플로우 종료 시 Letta 메모리 정리"""
+        """워크플로우 종료 시 Letta 메모리 정리 (안전 모드)"""
         if self._letta_initialized:
-            await self._letta.cleanup_agent(self.config.id)
-            self._letta_initialized = False
+            try:
+                # 타임아웃 2초로 제한
+                await asyncio.wait_for(self._letta.cleanup_agent(self.config.id), timeout=2.0)
+            except Exception as e:
+                print(f"[CoupangWorkflow] 메모리 정리 실패 (무시됨): {e}")
+            finally:
+                self._letta_initialized = False
 
     @property
     def config(self) -> WorkflowConfig:
@@ -296,13 +306,14 @@ class CoupangCollectWorkflow(WorkflowBase):
                 on_success="search_keyword",
                 on_failure="error_handler",
                 node_type="vlm",
+                timeout_sec=60,  # 1분
+                avg_duration_sec=15,  # 평균 15초
                 instruction="""Open Chrome browser and navigate to https://www.coupang.com
 
 Steps:
 1. Use open_url("https://www.coupang.com") to navigate to Coupang
 2. Wait for the page to fully load
 3. Confirm you see the Coupang homepage""",
-                # 재사용 설정은 Orchestrator-8B가 자동 판단
             ),
             WorkflowNode(
                 name="search_keyword",
@@ -311,6 +322,8 @@ Steps:
                 on_success="analyze_page",
                 on_failure="error_handler",
                 node_type="vlm",
+                timeout_sec=60,  # 1분
+                avg_duration_sec=20,  # 평균 20초
                 instruction="""Search for "{keyword}" on Coupang:
 
 Steps:
@@ -320,7 +333,6 @@ Steps:
 4. Press Enter to search using press(["enter"])
 5. Wait for search results to load using wait(3)
 6. Confirm search results are displayed""",
-                # 재사용 설정은 Orchestrator-8B가 자동 판단
             ),
             WorkflowNode(
                 name="analyze_page",
@@ -329,6 +341,8 @@ Steps:
                 on_success="save_products",
                 on_failure="error_handler",
                 node_type="vlm",
+                timeout_sec=180,  # 3분 (스크롤 + 분석)
+                avg_duration_sec=90,  # 평균 1분 30초
                 instruction="""Analyze the current Coupang search results page:
 
 Look at the product listings and identify products that do NOT have:
@@ -356,6 +370,8 @@ Steps:
                 on_success="check_next_page",
                 on_failure="error_handler",
                 node_type="process",
+                timeout_sec=30,  # 30초
+                avg_duration_sec=2,  # 평균 2초 (빠른 DB 작업)
             ),
             WorkflowNode(
                 name="check_next_page",
@@ -364,6 +380,8 @@ Steps:
                 on_success="analyze_page",  # 다음 페이지 있으면 다시 분석
                 on_failure="find_related",   # 없으면 연관 키워드로
                 node_type="vlm",
+                timeout_sec=60,  # 1분
+                avg_duration_sec=25,  # 평균 25초
                 instruction="""Check if there is a next page and navigate to it:
 
 Steps:
@@ -380,6 +398,8 @@ Steps:
                 on_success="search_keyword",  # 연관 키워드로 다시 검색
                 on_failure="complete",  # 없으면 완료
                 node_type="vlm",
+                timeout_sec=60,  # 1분
+                avg_duration_sec=30,  # 평균 30초
                 instruction="""Find related search keywords on Coupang:
 
 Steps:
@@ -394,12 +414,16 @@ Steps:
                 display_name="완료",
                 description="수집 완료",
                 node_type="end",
+                timeout_sec=10,
+                avg_duration_sec=1,
             ),
             WorkflowNode(
                 name="error_handler",
                 display_name="에러 처리",
                 description="에러 처리",
                 node_type="error",
+                timeout_sec=30,
+                avg_duration_sec=5,
             ),
         ]
 
@@ -431,7 +455,9 @@ Steps:
 
         handler = handlers.get(node_name)
         if handler:
+            print(f"[Workflow] Executing node: {node_name}")
             result = await handler(state)
+            print(f"[Workflow] Node completed: {node_name} (success={result.success}, next={result.next_node})")
 
             # 노드 완료 시 메모리 업데이트
             await self._update_memory_on_node_complete(node_name, state, result)
@@ -479,7 +505,17 @@ Steps:
             "observation": step_log.observation,
             "error": step_log.error,
             "tool_calls": tool_calls_serializable,
+            "orchestrator_feedback": getattr(step_log, "orchestrator_feedback", None),
         }
+
+        # 디버깅: 스텝 데이터 로깅
+        print(f"[StepLog] {node_name} step {step_log.step_number}: "
+              f"thought={bool(step_log.thought)}, "
+              f"action={bool(step_log.action)}, "
+              f"observation={bool(step_log.observation)}, "
+              f"screenshot={bool(step_log.screenshot)}")
+        if step_log.thought:
+            print(f"  -> thought: {step_log.thought[:100]}...")
 
         node_logs[node_name].append(step_data)
 
@@ -520,6 +556,9 @@ Steps:
         params = state.get("parameters", {})
         decision = None  # Orchestrator decision
 
+        # 현재 실행 ID (Orchestrator 로그용)
+        current_execution_id = state.get("execution_id", self.config.id)
+
         # === 1. Orchestrator 결정 (캐시 체크 포함) ===
         if self._use_orchestrator:
             # 비동기 Orchestrator-8B 모델 사용 (서버 실행 중일 때)
@@ -530,8 +569,27 @@ Steps:
                 instruction=instruction,
                 params=params,
                 node_config=node_config,
+                execution_id=current_execution_id,  # 실행 ID 전달
                 execution_history=self._get_recent_execution_history(),
             )
+            
+            # Calculate decision time
+            decision_time = int((time.time() - start_time) * 1000)
+
+            # Orchestrator 결정을 로그에 기록 (Step 0)
+            if decision:
+                self._add_step_to_node_logs(state, node_name, VLMStepLog(
+                    step_number=0,
+                    timestamp=datetime.now().isoformat(),
+                    thought=f"Orchestrator Decision: {decision.strategy.value}\nReason: {decision.reason}\nTime: {decision_time}ms",
+                    action=f"[Strategy] {decision.strategy.value}",
+                    observation=f"Model: {decision.model_id}\nReuse: {decision.reuse_trace}\nTime: {decision_time}ms",
+                    orchestrator_feedback={
+                        "action": "strategy_selected",
+                        "reason": f"{decision.reason} ({decision_time}ms)",
+                        "learned_pattern": decision.strategy.value
+                    }
+                ))
 
             # CACHE_HIT: 즉시 반환! (VLM 호출 없음, 판단도 스킵)
             if decision.strategy == ExecutionStrategy.CACHE_HIT:
@@ -559,6 +617,21 @@ Steps:
 
         def on_step(step_log):
             self._add_step_to_node_logs(state, node_name, step_log)
+
+            # Activity Log에 스텝 완료 기록
+            if step_log.step_number > 0:
+                log_vlm(
+                    ActivityType.EXECUTION,
+                    f"스텝 {step_log.step_number} 실행",
+                    details={
+                        "action": step_log.action,
+                        "thought": step_log.thought[:50] + "..." if step_log.thought else None,
+                    },
+                    execution_id=current_execution_id,
+                    node_id=node_name,
+                    duration_ms=getattr(step_log, "duration_ms", None),
+                )
+
             # 동기 콜백에서 비동기 작업 안전하게 실행
             try:
                 loop = asyncio.get_running_loop()
@@ -618,7 +691,7 @@ Steps:
                 "share_memory": share_memory,
                 "reuse_trace": reuse_trace,
             },
-            execution_id=self.config.id,
+            execution_id=current_execution_id,
             node_id=node_name,
         )
 
@@ -648,6 +721,41 @@ Steps:
                 actual_cost=0.0,  # TODO: 실제 비용 계산
             )
 
+        # Orchestrator로 결과 검증 (봇 감지 / 실패 패턴 체크)
+        if result.success and self._use_orchestrator:
+            # 마지막 스텝에서 thought, observation 추출
+            last_thought = None
+            last_observation = None
+            final_answer = result.data.get("final_answer") if result.data else None
+
+            if result.steps and len(result.steps) > 0:
+                last_step = result.steps[-1]
+                last_thought = last_step.thought
+                last_observation = last_step.observation
+
+            is_valid, error_type, error_message = self._orchestrator.validate_execution_result(
+                workflow_id=self.config.id,
+                node_id=node_name,
+                result_data=result.data or {},
+                final_answer=final_answer,
+                last_observation=last_observation,
+                last_thought=last_thought,
+            )
+
+            if not is_valid:
+                log_vlm(
+                    ActivityType.ERROR,
+                    f"{node_name} 검증 실패: {error_message}",
+                    details={
+                        "error_type": error_type,
+                        "error_message": error_message,
+                    },
+                    execution_id=current_execution_id,
+                    node_id=node_name,
+                    duration_ms=elapsed_ms,
+                )
+                return False, result.data, error_message
+
         # 활동 로그: VLM 실행 완료
         if result.success:
             log_vlm(
@@ -658,7 +766,7 @@ Steps:
                     "steps_count": len(result.data.get("steps", [])) if result.data else 0,
                     "reused": result.data.get("reused_from_cache", False) if result.data else False,
                 },
-                execution_id=self.config.id,
+                execution_id=current_execution_id,
                 node_id=node_name,
                 duration_ms=elapsed_ms,
             )
@@ -673,7 +781,7 @@ Steps:
                     "success": False,
                     "error": result.error,
                 },
-                execution_id=self.config.id,
+                execution_id=current_execution_id,
                 node_id=node_name,
                 duration_ms=elapsed_ms,
             )
@@ -779,7 +887,7 @@ Steps:
 
         # Orchestrator 추적 시작
         if self._use_orchestrator:
-            total_nodes = len([n for n in self.nodes.values()
+            total_nodes = len([n for n in self.nodes
                               if n.node_type == "vlm"])  # VLM 노드만 카운트
             self._orchestrator.start_workflow_tracking(
                 workflow_id=self.config.id,
@@ -1105,14 +1213,13 @@ Steps:
         )
 
     async def _error_handler(self, state: WorkflowState) -> NodeResult:
-        """에러 처리"""
+        """에러 처리 및 복구"""
         error = state.get("error", "Unknown error")
+        print(f"[CoupangWorkflow] Error handled: {error}")
 
-        # 에러 로깅
-        print(f"[CoupangWorkflow] Error: {error}")
-
+        # 복구 시도: 에러를 기록하고 완료 단계로 이동하여 부분 성공 처리 (Graceful Shutdown)
         return NodeResult(
-            success=False,
-            error=error,
-            data={"error_handled": True}
+            success=True,
+            data={"error_handled": True, "original_error": error},
+            next_node="complete"
         )

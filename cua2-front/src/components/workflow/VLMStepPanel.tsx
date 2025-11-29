@@ -982,10 +982,13 @@ const StepItem: React.FC<StepItemProps> = ({ step, isLatest, index, evaluation, 
                   p: 1,
                   borderRadius: 1,
                   whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
                   lineHeight: 1.5,
+                  maxHeight: 150,
+                  overflow: 'auto',
                 }}
               >
-                {step.thought.length > 200 ? `${step.thought.slice(0, 200)}...` : step.thought}
+                {step.thought}
               </Typography>
             </Box>
           )}
@@ -1033,9 +1036,12 @@ const StepItem: React.FC<StepItemProps> = ({ step, isLatest, index, evaluation, 
                   p: 1,
                   borderRadius: 1,
                   whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  maxHeight: 100,
+                  overflow: 'auto',
                 }}
               >
-                {step.observation.length > 100 ? `${step.observation.slice(0, 100)}...` : step.observation}
+                {step.observation}
               </Typography>
             </Box>
           )}

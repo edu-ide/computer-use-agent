@@ -86,6 +86,15 @@ const WorkflowDetail: React.FC = () => {
     lastScreenshot,
     error,
     wsConnected,
+    // 현재 노드 상세 정보
+    currentNodeStartTime,
+    currentThought,
+    currentAction,
+    currentObservation,
+    stepCount,
+    // 에러 추적 정보
+    consecutiveErrors,
+    lastError,
   } = state.context;
 
   // 현재 상태 값
@@ -185,6 +194,15 @@ const WorkflowDetail: React.FC = () => {
               },
               allSteps: data.all_steps,
               lastScreenshot: data.last_screenshot,
+              // 현재 노드 상세 정보
+              currentNodeStartTime: data.current_node_start_time,
+              currentThought: data.current_thought,
+              currentAction: data.current_action,
+              currentObservation: data.current_observation,
+              stepCount: data.step_count,
+              // 에러 추적 정보
+              consecutiveErrors: data.consecutive_errors,
+              lastError: data.last_error,
             });
             break;
           case 'step':
@@ -341,6 +359,15 @@ const WorkflowDetail: React.FC = () => {
       currentNode: currentNode || null,
       completedNodes: completedNodes || [],
       failedNodes: failedNodes || [],
+      // 현재 노드 상세 정보
+      currentNodeStartTime: currentNodeStartTime || undefined,
+      currentThought: currentThought || undefined,
+      currentAction: currentAction || undefined,
+      currentObservation: currentObservation || undefined,
+      stepCount: stepCount || undefined,
+      // 에러 추적 정보
+      consecutiveErrors: consecutiveErrors || undefined,
+      lastError: lastError || undefined,
     };
   };
 

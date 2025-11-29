@@ -21,6 +21,7 @@ import {
   FiZap,
   FiRefreshCw,
   FiLink,
+  FiClock,
 } from 'react-icons/fi';
 
 // 실행 중 그라데이션 애니메이션
@@ -63,6 +64,17 @@ export interface WorkflowNodeData {
   stepCount?: number; // VLM 스텝 수
   instruction?: string; // VLM 에이전트에 전달하는 명령 (시스템 프롬프트)
   onClick?: () => void;
+  // 시간 설정
+  timeoutSec?: number;  // 작업 제한시간 (초)
+  avgDurationSec?: number;  // 평균 작업 시간 (초)
+  elapsedSec?: number;  // 현재 진행 시간 (초, 실행 중일 때)
+  // 현재 작업 정보 (실행 중일 때)
+  currentAction?: string;  // 현재 수행 중인 액션
+  currentThought?: string;  // 현재 생각/판단
+  currentObservation?: string;  // 현재 관찰 결과
+  // 에러 추적
+  consecutiveErrors?: number;  // 연속 에러 횟수
+  lastError?: string;  // 마지막 에러 메시지
   // 재사용/메모리 설정
   reusable?: boolean;  // trace 재사용 가능 여부
   reuseTrace?: boolean;  // 이전 trace 재사용 여부
@@ -283,20 +295,168 @@ const WorkflowNode = memo(({ data, selected }: NodeProps<WorkflowNodeData>) => {
           </Box>
         </Box>
 
-        {/* 설명 */}
-        <Typography
-          sx={{
-            fontSize: '12px',
-            color: '#64748b',
-            lineHeight: 1.5,
-            display: '-webkit-box',
-            WebkitLineClamp: 2,
-            WebkitBoxOrient: 'vertical',
-            overflow: 'hidden',
-          }}
-        >
-          {data.description}
-        </Typography>
+        {/* 설명 또는 현재 상태 (실행 중일 때) */}
+        {isRunning && (data.currentThought || data.currentAction || data.currentObservation) ? (
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.8, maxHeight: 180, overflow: 'auto' }}>
+            {/* 현재 생각 (Thought) */}
+            {data.currentThought && (
+              <Box
+                sx={{
+                  backgroundColor: 'rgba(139, 92, 246, 0.08)',
+                  borderRadius: 1,
+                  p: 1,
+                  border: '1px solid rgba(139, 92, 246, 0.2)',
+                }}
+              >
+                <Typography
+                  sx={{
+                    fontSize: '10px',
+                    color: '#7c3aed',
+                    fontWeight: 600,
+                    mb: 0.3,
+                  }}
+                >
+                  💭 생각
+                </Typography>
+                <Typography
+                  sx={{
+                    fontSize: '11px',
+                    color: '#5b21b6',
+                    lineHeight: 1.4,
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                    maxHeight: 60,
+                    overflow: 'auto',
+                  }}
+                >
+                  {data.currentThought}
+                </Typography>
+              </Box>
+            )}
+            {/* 현재 액션 */}
+            {data.currentAction && (
+              <Box
+                sx={{
+                  backgroundColor: 'rgba(59, 130, 246, 0.08)',
+                  borderRadius: 1,
+                  p: 1,
+                  border: '1px solid rgba(59, 130, 246, 0.2)',
+                }}
+              >
+                <Typography
+                  sx={{
+                    fontSize: '10px',
+                    color: '#3b82f6',
+                    fontWeight: 600,
+                    mb: 0.3,
+                  }}
+                >
+                  🎯 액션
+                </Typography>
+                <Typography
+                  sx={{
+                    fontSize: '11px',
+                    color: '#1e40af',
+                    lineHeight: 1.4,
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                    maxHeight: 40,
+                    overflow: 'auto',
+                  }}
+                >
+                  {data.currentAction}
+                </Typography>
+              </Box>
+            )}
+            {/* 관찰 결과 */}
+            {data.currentObservation && (
+              <Box
+                sx={{
+                  backgroundColor: 'rgba(16, 185, 129, 0.08)',
+                  borderRadius: 1,
+                  p: 1,
+                  border: '1px solid rgba(16, 185, 129, 0.2)',
+                }}
+              >
+                <Typography
+                  sx={{
+                    fontSize: '10px',
+                    color: '#059669',
+                    fontWeight: 600,
+                    mb: 0.3,
+                  }}
+                >
+                  👁️ 관찰
+                </Typography>
+                <Typography
+                  sx={{
+                    fontSize: '11px',
+                    color: '#047857',
+                    lineHeight: 1.4,
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                    maxHeight: 40,
+                    overflow: 'auto',
+                  }}
+                >
+                  {data.currentObservation}
+                </Typography>
+              </Box>
+            )}
+          </Box>
+        ) : (
+          <Typography
+            sx={{
+              fontSize: '12px',
+              color: '#64748b',
+              lineHeight: 1.5,
+              display: '-webkit-box',
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: 'vertical',
+              overflow: 'hidden',
+            }}
+          >
+            {data.description}
+          </Typography>
+        )}
+
+        {/* 연속 에러 경고 (실행 중일 때) */}
+        {isRunning && data.consecutiveErrors && data.consecutiveErrors > 0 && (
+          <Box
+            sx={{
+              mt: 1,
+              backgroundColor: data.consecutiveErrors >= 3 ? 'rgba(239, 68, 68, 0.15)' : 'rgba(245, 158, 11, 0.15)',
+              borderRadius: 1,
+              p: 0.8,
+              border: `1px solid ${data.consecutiveErrors >= 3 ? 'rgba(239, 68, 68, 0.3)' : 'rgba(245, 158, 11, 0.3)'}`,
+            }}
+          >
+            <Typography
+              sx={{
+                fontSize: '10px',
+                color: data.consecutiveErrors >= 3 ? '#dc2626' : '#d97706',
+                fontWeight: 700,
+              }}
+            >
+              ⚠️ 연속 에러 {data.consecutiveErrors}회 {data.consecutiveErrors >= 3 && '- 중단 예정'}
+            </Typography>
+            {data.lastError && (
+              <Typography
+                sx={{
+                  fontSize: '10px',
+                  color: data.consecutiveErrors >= 3 ? '#b91c1c' : '#b45309',
+                  mt: 0.3,
+                  display: '-webkit-box',
+                  WebkitLineClamp: 1,
+                  WebkitBoxOrient: 'vertical',
+                  overflow: 'hidden',
+                }}
+              >
+                {data.lastError}
+              </Typography>
+            )}
+          </Box>
+        )}
 
         {/* 재사용/메모리 설정 배지 */}
         {(data.reusable || data.reuseTrace || data.shareMemory) && (
@@ -358,44 +518,63 @@ const WorkflowNode = memo(({ data, selected }: NodeProps<WorkflowNodeData>) => {
           </Box>
         )}
 
-        {/* 실행 정보 (완료된 경우) 또는 VLM 노드의 경우 항상 표시 */}
-        {((isSuccess || isFailed) && (data.executionTime || data.stepCount)) || isVLM ? (
+        {/* 시간 정보 (항상 표시) */}
+        {(data.timeoutSec || data.avgDurationSec || isRunning) && (
           <Box
             sx={{
               display: 'flex',
               alignItems: 'center',
-              gap: 1.5,
+              gap: 1,
               mt: 1.5,
               pt: 1.5,
               borderTop: '1px solid #f1f5f9',
             }}
           >
-            {data.executionTime !== undefined && (
+            <FiClock size={12} color="#94a3b8" />
+            {isRunning && data.elapsedSec !== undefined ? (
+              // 실행 중: 진행 시간 / 제한시간
+              <Typography sx={{ fontSize: '11px', color: data.elapsedSec > (data.timeoutSec || 120) * 0.8 ? '#ef4444' : '#3b82f6', fontWeight: 600 }}>
+                {data.elapsedSec}초 / {data.timeoutSec || 120}초
+              </Typography>
+            ) : isSuccess || isFailed ? (
+              // 완료/실패: 실제 소요 시간
               <Typography sx={{ fontSize: '11px', color: '#94a3b8' }}>
-                {data.executionTime < 1000
-                  ? `${data.executionTime}ms`
-                  : `${(data.executionTime / 1000).toFixed(1)}s`}
+                {data.executionTime !== undefined
+                  ? data.executionTime < 1000
+                    ? `${data.executionTime}ms`
+                    : `${(data.executionTime / 1000).toFixed(1)}초`
+                  : '-'}
+              </Typography>
+            ) : (
+              // 대기: 평균 시간 / 제한시간
+              <Typography sx={{ fontSize: '11px', color: '#94a3b8' }}>
+                {data.avgDurationSec ? `~${data.avgDurationSec}초` : ''}
+                {data.avgDurationSec && data.timeoutSec ? ' / ' : ''}
+                {data.timeoutSec ? `${data.timeoutSec}초` : ''}
               </Typography>
             )}
-            {data.stepCount !== undefined && (
-              <Typography sx={{ fontSize: '11px', color: '#94a3b8' }}>
+            {data.stepCount !== undefined && data.stepCount > 0 && (
+              <Typography sx={{ fontSize: '11px', color: '#94a3b8', ml: 'auto' }}>
                 {data.stepCount}단계
               </Typography>
             )}
-            {isClickable && (
-              <Typography
-                sx={{
-                  fontSize: '11px',
-                  color: '#3b82f6',
-                  fontWeight: 600,
-                  ml: 'auto',
-                }}
-              >
-                클릭하여 상세보기
-              </Typography>
-            )}
           </Box>
-        ) : null}
+        )}
+
+        {/* 클릭 안내 (클릭 가능한 경우) */}
+        {isClickable && (
+          <Box sx={{ mt: 1, textAlign: 'right' }}>
+            <Typography
+              sx={{
+                fontSize: '11px',
+                color: '#3b82f6',
+                fontWeight: 600,
+              }}
+            >
+              클릭하여 상세보기
+            </Typography>
+          </Box>
+        )}
       </Box>
 
       {/* 핸들 - 입력 (왼쪽) */}

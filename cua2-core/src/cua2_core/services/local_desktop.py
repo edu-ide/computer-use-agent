@@ -27,7 +27,10 @@ class LocalDesktop:
         self._browser_started = False
 
         # Xvfb 전용 프로필 디렉토리 (기존 브라우저와 분리)
-        self.profile_dir = f"/tmp/cua-xvfb-profile-{display_num}"
+        # Snap 패키지 호환성을 위해 /tmp 대신 홈 디렉토리 사용
+        self.base_profile_dir = os.path.expanduser("~/.cua/profiles")
+        os.makedirs(self.base_profile_dir, exist_ok=True)
+        self.profile_dir = os.path.join(self.base_profile_dir, f"xvfb-profile-{display_num}")
         os.makedirs(self.profile_dir, exist_ok=True)
 
         # Xvfb 가상 디스플레이 시작
@@ -80,7 +83,7 @@ class LocalDesktop:
 
     def move_mouse(self, x: int, y: int):
         """마우스 이동"""
-        self._run_xdotool("mousemove", str(x), str(y))
+        self._run_xdotool("mousemove", "--sync", str(x), str(y))
 
     def left_click(self):
         """왼쪽 클릭"""
@@ -138,35 +141,77 @@ class LocalDesktop:
         self._run_xdotool("mousemove", str(end[0]), str(end[1]))
         self._run_xdotool("mouseup", "1")
 
-    def open(self, url: str):
-        """URL 열기 (가상 디스플레이에서 브라우저 실행)"""
+    def open(self, url: str, browser_type: str = "firefox"):
+        """URL 열기 (가상 디스플레이에서 브라우저 실행)
+
+        Args:
+            url: 열 URL
+            browser_type: "firefox" (기본) 또는 "chromium"
+        """
         env = self._get_env()
 
-        # 기존 브라우저 프로세스 종료 (같은 프로필 사용하는 것만)
-        subprocess.run(
-            ["pkill", "-f", f"--user-data-dir={self.profile_dir}"],
-            capture_output=True
-        )
-        time.sleep(0.5)
+        # 기존 브라우저 프로세스 종료
+        subprocess.run(["pkill", "-f", f"profile.*{self.display_num}"], capture_output=True)
+        subprocess.run(["pkill", "-f", f"firefox-{self.display_num}"], capture_output=True)
+        subprocess.run(["pkill", "-f", f"--user-data-dir={self.profile_dir}"], capture_output=True)
+        time.sleep(1.0)
 
-        # Chromium 실행 (새 인스턴스로 강제 실행)
+        # Firefox 우선 시도 (봇 감지에 더 유리)
+        if browser_type == "firefox":
+            import shutil
+            # 매번 새로운 프로필 생성 (기존 프로필 삭제)
+            # Snap 패키지 호환성을 위해 홈 디렉토리 사용
+            firefox_profile = os.path.join(self.base_profile_dir, f"firefox-{self.display_num}")
+            if os.path.exists(firefox_profile):
+                try:
+                    shutil.rmtree(firefox_profile)
+                except Exception as e:
+                    print(f"Firefox 프로필 삭제 실패: {e}")
+            os.makedirs(firefox_profile, exist_ok=True)
+
+            try:
+                self._browser_proc = subprocess.Popen(
+                    [
+                        "firefox",
+                        "--new-instance",
+                        "--no-remote",  # 기존 Firefox 인스턴스와 분리
+                        "-profile", firefox_profile,
+                        f"--width={self.width}",
+                        f"--height={self.height}",
+                        url
+                    ],
+                    env=env,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+                print(f"Firefox 시작 (Xvfb {self.display}) -> {url}")
+                self._browser_started = True
+                time.sleep(5)
+                return
+            except FileNotFoundError:
+                print("Firefox를 찾을 수 없음, Chromium으로 시도...")
+
+        # Chromium (fallback 또는 명시적 요청)
+        # 프로필 디렉토리 초기화 (Lock 파일 문제 방지)
+        import shutil
+        if os.path.exists(self.profile_dir):
+            try:
+                shutil.rmtree(self.profile_dir)
+            except Exception as e:
+                print(f"Chromium 프로필 삭제 실패: {e}")
+        os.makedirs(self.profile_dir, exist_ok=True)
+
         for browser in ["chromium-browser", "chromium", "google-chrome"]:
             try:
                 self._browser_proc = subprocess.Popen(
                     [
                         browser,
                         f"--user-data-dir={self.profile_dir}",
+                        f"--window-size={self.width},{self.height}",
                         "--no-first-run",
                         "--no-default-browser-check",
-                        "--disable-sync",
-                        "--disable-popup-blocking",
                         "--no-sandbox",
-                        "--disable-gpu",
                         "--disable-dev-shm-usage",
-                        "--disable-software-rasterizer",
-                        "--disable-extensions",
-                        "--start-maximized",
-                        "--new-window",
                         url
                     ],
                     env=env,
@@ -175,28 +220,10 @@ class LocalDesktop:
                 )
                 print(f"{browser} 시작 (Xvfb {self.display}) -> {url}")
                 self._browser_started = True
-                # 브라우저 로딩 대기
                 time.sleep(5)
                 return
             except FileNotFoundError:
                 continue
-
-        # Firefox
-        firefox_profile = f"/tmp/cua-xvfb-firefox-{self.display_num}"
-        os.makedirs(firefox_profile, exist_ok=True)
-        try:
-            self._browser_proc = subprocess.Popen(
-                ["firefox", "--new-instance", "-profile", firefox_profile, url],
-                env=env,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-            print(f"Firefox 시작 (Xvfb {self.display}) -> {url}")
-            self._browser_started = True
-            time.sleep(5)
-            return
-        except FileNotFoundError:
-            pass
 
         print("브라우저를 찾을 수 없습니다")
 

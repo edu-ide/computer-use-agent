@@ -95,6 +95,9 @@ export interface WorkflowDefinition {
     description: string;
     status?: string;
     nodeType?: string;
+    // 시간 설정
+    timeout_sec?: number;
+    avg_duration_sec?: number;
     // 재사용/메모리 설정
     reusable?: boolean;
     reuse_trace?: boolean;
@@ -113,6 +116,15 @@ export interface ExecutionState {
   currentNode: string | null;
   completedNodes: string[];
   failedNodes: string[];
+  // 현재 노드 상세 정보
+  currentNodeStartTime?: string;  // 현재 노드 시작 시간 (ISO string)
+  currentAction?: string;  // 현재 수행 중인 액션
+  currentThought?: string;  // 현재 생각/판단
+  currentObservation?: string;  // 현재 관찰 결과
+  stepCount?: number;  // 현재 노드의 스텝 수
+  // 에러 추적
+  consecutiveErrors?: number;  // 연속 에러 횟수
+  lastError?: string;  // 마지막 에러 메시지
 }
 
 export interface ParameterConfig {
@@ -195,6 +207,9 @@ const WorkflowGraphInner: React.FC<WorkflowGraphProps> = ({
           status: status,
           nodeType: nodeType,
           onClick: onNodeClick ? () => onNodeClick(nodeDef.id) : undefined,
+          // 시간 설정 (snake_case → camelCase)
+          timeoutSec: nodeDef.timeout_sec,
+          avgDurationSec: nodeDef.avg_duration_sec,
           // 재사용/메모리 설정 (snake_case → camelCase)
           reusable: nodeDef.reusable,
           reuseTrace: nodeDef.reuse_trace,
@@ -285,16 +300,36 @@ const WorkflowGraphInner: React.FC<WorkflowGraphProps> = ({
     setEdges(layoutedEdges);
   }, [layoutedNodes, layoutedEdges, setNodes, setEdges]);
 
+  // 경과 시간 계산 함수
+  const calculateElapsedSec = (startTime?: string): number | undefined => {
+    if (!startTime) return undefined;
+    const start = new Date(startTime).getTime();
+    const now = Date.now();
+    return Math.floor((now - start) / 1000);
+  };
+
   // 상태 변경 시 노드 업데이트 (위치는 유지)
   useEffect(() => {
     setNodes((nds) =>
-      nds.map((node) => ({
-        ...node,
-        data: {
-          ...node.data,
-          status: getNodeStatus(node.id),
-        },
-      }))
+      nds.map((node) => {
+        const isCurrentNode = executionState?.currentNode === node.id;
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            status: getNodeStatus(node.id),
+            // 현재 실행 중인 노드에만 추가 정보 전달
+            currentAction: isCurrentNode ? executionState?.currentAction : undefined,
+            currentThought: isCurrentNode ? executionState?.currentThought : undefined,
+            currentObservation: isCurrentNode ? executionState?.currentObservation : undefined,
+            stepCount: isCurrentNode ? executionState?.stepCount : node.data.stepCount,
+            elapsedSec: isCurrentNode ? calculateElapsedSec(executionState?.currentNodeStartTime) : undefined,
+            // 에러 추적
+            consecutiveErrors: isCurrentNode ? executionState?.consecutiveErrors : undefined,
+            lastError: isCurrentNode ? executionState?.lastError : undefined,
+          },
+        };
+      })
     );
 
     setEdges((eds) =>

@@ -13,6 +13,12 @@ import {
   Paper,
   Divider,
   Badge,
+  TextField,
+  InputAdornment,
+  Menu,
+  MenuItem,
+  ListItemIcon,
+  ListItemText,
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
@@ -25,6 +31,13 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';
 import CachedIcon from '@mui/icons-material/Cached';
 import CircularProgress from '@mui/material/CircularProgress';
+import SearchIcon from '@mui/icons-material/Search';
+import FilterListIcon from '@mui/icons-material/FilterList';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import DeleteIcon from '@mui/icons-material/Delete';
+import MoreVertIcon from '@mui/icons-material/MoreVert';
+import OpenInFullIcon from '@mui/icons-material/OpenInFull';
+import CloseFullscreenIcon from '@mui/icons-material/CloseFullscreen';
 
 interface AgentActivity {
   id: string;
@@ -70,6 +83,7 @@ const ACTIVITY_ICONS: Record<string, React.ReactNode> = {
   cache_hit: <CachedIcon fontSize="inherit" color="success" />,
   cache_miss: <CachedIcon fontSize="inherit" color="disabled" />,
   error: <ErrorIcon fontSize="inherit" color="error" />,
+  warning: <ErrorIcon fontSize="inherit" color="warning" />,
   info: <CheckCircleIcon fontSize="inherit" color="info" />,
 };
 
@@ -91,6 +105,47 @@ const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({
   const [connected, setConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const activitiesEndRef = useRef<HTMLDivElement>(null);
+
+  // 새로운 상태들
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterAgent, setFilterAgent] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false); // 확장 모드
+  const [selectedActivity, setSelectedActivity] = useState<AgentActivity | null>(null);
+  const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
+  const [filterMenuAnchor, setFilterMenuAnchor] = useState<null | HTMLElement>(null);
+
+  // 필터링된 활동 목록
+  const filteredActivities = activities.filter((activity) => {
+    const matchesSearch = searchQuery === '' ||
+      activity.message.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (activity.node_id && activity.node_id.toLowerCase().includes(searchQuery.toLowerCase()));
+    const matchesFilter = filterAgent === null || activity.agent_type === filterAgent;
+    return matchesSearch && matchesFilter;
+  });
+
+  // 클립보드 복사
+  const handleCopyActivity = (activity: AgentActivity) => {
+    const text = `[${activity.timestamp_iso}] [${activity.agent_type}] ${activity.message}${
+      activity.details ? '\n상세: ' + JSON.stringify(activity.details, null, 2) : ''
+    }`;
+    navigator.clipboard.writeText(text);
+    setMenuAnchor(null);
+  };
+
+  // 전체 로그 복사
+  const handleCopyAllLogs = () => {
+    const text = filteredActivities
+      .map((a) => `[${a.timestamp_iso}] [${a.agent_type}] ${a.message}`)
+      .join('\n');
+    navigator.clipboard.writeText(text);
+    setMenuAnchor(null);
+  };
+
+  // 로그 초기화
+  const handleClearLogs = () => {
+    setActivities([]);
+    setMenuAnchor(null);
+  };
 
   // WebSocket 연결
   useEffect(() => {
@@ -182,13 +237,15 @@ const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({
       sx={{
         position: 'absolute',
         top: 16,
-        right: 16,
-        width: collapsed ? 200 : 360,
-        maxHeight: collapsed ? 'auto' : 400,
+        left: 16,
+        width: collapsed ? 200 : expanded ? 500 : 400,
+        maxHeight: collapsed ? 'auto' : expanded ? '80vh' : 500,
         zIndex: 10,
         overflow: 'hidden',
         transition: 'all 0.2s ease',
         borderRadius: 2,
+        display: 'flex',
+        flexDirection: 'column',
       }}
     >
       {/* 헤더 */}
@@ -202,11 +259,13 @@ const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({
           bgcolor: 'background.paper',
           borderBottom: collapsed ? 'none' : '1px solid',
           borderColor: 'divider',
-          cursor: 'pointer',
+          flexShrink: 0,
         }}
-        onClick={onToggle}
       >
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        <Box
+          sx={{ display: 'flex', alignItems: 'center', gap: 1, cursor: 'pointer' }}
+          onClick={onToggle}
+        >
           <Badge
             color={connected ? 'success' : 'error'}
             variant="dot"
@@ -217,25 +276,138 @@ const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({
           <Typography variant="subtitle2" fontWeight={600}>
             에이전트 활동
           </Typography>
-          {activities.length > 0 && (
-            <Chip label={activities.length} size="small" color="primary" />
+          {filteredActivities.length > 0 && (
+            <Chip
+              label={filterAgent ? `${filteredActivities.length}/${activities.length}` : activities.length}
+              size="small"
+              color="primary"
+            />
           )}
         </Box>
-        <IconButton size="small">
-          {collapsed ? <ExpandMoreIcon /> : <ExpandLessIcon />}
-        </IconButton>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+          {!collapsed && (
+            <>
+              <Tooltip title={expanded ? '축소' : '확장'}>
+                <IconButton size="small" onClick={() => setExpanded(!expanded)}>
+                  {expanded ? <CloseFullscreenIcon fontSize="small" /> : <OpenInFullIcon fontSize="small" />}
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="더보기">
+                <IconButton size="small" onClick={(e) => setMenuAnchor(e.currentTarget)}>
+                  <MoreVertIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            </>
+          )}
+          <IconButton size="small" onClick={onToggle}>
+            {collapsed ? <ExpandMoreIcon /> : <ExpandLessIcon />}
+          </IconButton>
+        </Box>
       </Box>
 
+      {/* 더보기 메뉴 */}
+      <Menu
+        anchorEl={menuAnchor}
+        open={Boolean(menuAnchor)}
+        onClose={() => setMenuAnchor(null)}
+      >
+        <MenuItem onClick={handleCopyAllLogs}>
+          <ListItemIcon><ContentCopyIcon fontSize="small" /></ListItemIcon>
+          <ListItemText>전체 로그 복사</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={handleClearLogs}>
+          <ListItemIcon><DeleteIcon fontSize="small" /></ListItemIcon>
+          <ListItemText>로그 초기화</ListItemText>
+        </MenuItem>
+      </Menu>
+
       <Collapse in={!collapsed}>
+        {/* 검색 및 필터 */}
+        <Box
+          sx={{
+            px: 1.5,
+            py: 1,
+            display: 'flex',
+            gap: 1,
+            alignItems: 'center',
+            bgcolor: 'action.hover',
+            borderBottom: '1px solid',
+            borderColor: 'divider',
+          }}
+        >
+          <TextField
+            size="small"
+            placeholder="검색..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            sx={{
+              flex: 1,
+              '& .MuiOutlinedInput-root': {
+                height: 32,
+                fontSize: '0.8rem',
+              },
+            }}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon fontSize="small" sx={{ color: 'text.secondary' }} />
+                </InputAdornment>
+              ),
+            }}
+          />
+          <Tooltip title="필터">
+            <IconButton
+              size="small"
+              onClick={(e) => setFilterMenuAnchor(e.currentTarget)}
+              sx={{
+                bgcolor: filterAgent ? AGENT_COLORS[filterAgent] : 'transparent',
+                color: filterAgent ? 'white' : 'inherit',
+                '&:hover': {
+                  bgcolor: filterAgent ? AGENT_COLORS[filterAgent] : 'action.hover',
+                },
+              }}
+            >
+              <FilterListIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        </Box>
+
+        {/* 필터 메뉴 */}
+        <Menu
+          anchorEl={filterMenuAnchor}
+          open={Boolean(filterMenuAnchor)}
+          onClose={() => setFilterMenuAnchor(null)}
+        >
+          <MenuItem
+            onClick={() => { setFilterAgent(null); setFilterMenuAnchor(null); }}
+            selected={filterAgent === null}
+          >
+            <ListItemText>전체 보기</ListItemText>
+          </MenuItem>
+          <Divider />
+          {agents.map((agent) => (
+            <MenuItem
+              key={agent.type}
+              onClick={() => { setFilterAgent(agent.type); setFilterMenuAnchor(null); }}
+              selected={filterAgent === agent.type}
+            >
+              <ListItemIcon sx={{ color: AGENT_COLORS[agent.type] }}>
+                {AGENT_ICONS[agent.type]}
+              </ListItemIcon>
+              <ListItemText>{agent.name}</ListItemText>
+            </MenuItem>
+          ))}
+        </Menu>
+
         {/* 에이전트 상태 요약 */}
         <Box
           sx={{
-            px: 2,
-            py: 1.5,
+            px: 1.5,
+            py: 1,
             display: 'flex',
-            gap: 1,
+            gap: 0.5,
             flexWrap: 'wrap',
-            bgcolor: 'action.hover',
+            bgcolor: 'background.paper',
           }}
         >
           {agents.map((agent) => (
@@ -252,6 +424,7 @@ const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({
                 icon={AGENT_ICONS[agent.type] as React.ReactElement}
                 label={agent.name.split(' ')[0]}
                 size="small"
+                onClick={() => setFilterAgent(filterAgent === agent.type ? null : agent.type)}
                 sx={{
                   bgcolor: agent.status === 'active' ? AGENT_COLORS[agent.type] : 'action.selected',
                   color: agent.status === 'active' ? 'white' : 'text.secondary',
@@ -259,6 +432,9 @@ const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({
                     color: agent.status === 'active' ? 'white' : 'inherit',
                   },
                   transition: 'all 0.2s',
+                  cursor: 'pointer',
+                  border: filterAgent === agent.type ? '2px solid' : 'none',
+                  borderColor: 'primary.main',
                 }}
               />
             </Tooltip>
@@ -270,33 +446,50 @@ const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({
         {/* 활동 로그 */}
         <Box
           sx={{
-            maxHeight: 280,
+            flex: 1,
             overflow: 'auto',
-            '&::-webkit-scrollbar': { width: 6 },
-            '&::-webkit-scrollbar-thumb': {
-              bgcolor: 'divider',
-              borderRadius: 3,
+            // 스크롤바 스타일링 (항상 표시)
+            '&::-webkit-scrollbar': {
+              width: 8,
             },
+            '&::-webkit-scrollbar-track': {
+              bgcolor: 'action.hover',
+              borderRadius: 4,
+            },
+            '&::-webkit-scrollbar-thumb': {
+              bgcolor: 'primary.light',
+              borderRadius: 4,
+              border: '2px solid transparent',
+              backgroundClip: 'padding-box',
+              '&:hover': {
+                bgcolor: 'primary.main',
+              },
+            },
+            // Firefox 스크롤바
+            scrollbarWidth: 'thin',
+            scrollbarColor: 'rgba(25, 118, 210, 0.5) rgba(0, 0, 0, 0.1)',
           }}
         >
-          {activities.length === 0 ? (
+          {filteredActivities.length === 0 ? (
             <Box sx={{ p: 3, textAlign: 'center' }}>
               <Typography variant="body2" color="text.secondary">
-                아직 활동이 없습니다
+                {activities.length === 0 ? '아직 활동이 없습니다' : '검색 결과가 없습니다'}
               </Typography>
             </Box>
           ) : (
-            activities.map((activity, index) => (
+            filteredActivities.map((activity, index) => (
               <Box
                 key={activity.id || index}
                 sx={{
-                  px: 2,
+                  px: 1.5,
                   py: 1,
                   borderBottom: '1px solid',
                   borderColor: 'divider',
                   '&:hover': { bgcolor: 'action.hover' },
                   transition: 'background 0.1s',
+                  cursor: 'pointer',
                 }}
+                onClick={() => setSelectedActivity(selectedActivity?.id === activity.id ? null : activity)}
               >
                 <Box
                   sx={{
@@ -308,8 +501,8 @@ const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({
                   {/* 에이전트 아이콘 */}
                   <Box
                     sx={{
-                      width: 24,
-                      height: 24,
+                      width: 22,
+                      height: 22,
                       borderRadius: '50%',
                       bgcolor: AGENT_COLORS[activity.agent_type] || '#64748b',
                       display: 'flex',
@@ -317,7 +510,7 @@ const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({
                       justifyContent: 'center',
                       color: 'white',
                       flexShrink: 0,
-                      mt: 0.3,
+                      mt: 0.2,
                     }}
                   >
                     {AGENT_ICONS[activity.agent_type]}
@@ -325,59 +518,107 @@ const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({
 
                   {/* 내용 */}
                   <Box sx={{ flex: 1, minWidth: 0 }}>
-                    <Box
+                    {/* 메시지 - 확장 모드에서는 줄바꿈 허용 */}
+                    <Typography
+                      variant="body2"
                       sx={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
+                        fontWeight: 500,
+                        fontSize: '0.82rem',
+                        lineHeight: 1.4,
+                        wordBreak: 'break-word',
+                        ...(expanded || selectedActivity?.id === activity.id
+                          ? { whiteSpace: 'pre-wrap' }
+                          : {
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                            }),
                       }}
                     >
-                      <Typography
-                        variant="body2"
-                        sx={{
-                          fontWeight: 500,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {activity.message}
-                      </Typography>
-                      <Typography
-                        variant="caption"
-                        color="text.secondary"
-                        sx={{ flexShrink: 0, ml: 1 }}
-                      >
+                      {activity.message}
+                    </Typography>
+
+                    {/* 메타 정보 */}
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.3, flexWrap: 'wrap' }}>
+                      <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
                         {activity.time_ago}
                       </Typography>
+                      {activity.duration_ms && (
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
+                          • {activity.duration_ms}ms
+                        </Typography>
+                      )}
+                      {activity.node_id && (
+                        <Chip
+                          label={activity.node_id}
+                          size="small"
+                          sx={{ height: 16, fontSize: '0.65rem', bgcolor: 'action.selected' }}
+                        />
+                      )}
+                      {/* 활동 타입 뱃지 */}
+                      {activity.activity_type === 'cache_hit' && (
+                        <Chip
+                          label="캐시"
+                          size="small"
+                          color="success"
+                          sx={{ height: 16, fontSize: '0.65rem' }}
+                        />
+                      )}
+                      {activity.activity_type === 'error' && (
+                        <Chip
+                          label="오류"
+                          size="small"
+                          color="error"
+                          sx={{ height: 16, fontSize: '0.65rem' }}
+                        />
+                      )}
+                      {activity.activity_type === 'warning' && (
+                        <Chip
+                          label="주의"
+                          size="small"
+                          color="warning"
+                          sx={{ height: 16, fontSize: '0.65rem' }}
+                        />
+                      )}
                     </Box>
 
-                    {/* 상세 정보 */}
-                    {activity.duration_ms && (
-                      <Typography variant="caption" color="text.secondary">
-                        {activity.duration_ms}ms
-                        {activity.node_id && ` | ${activity.node_id}`}
-                      </Typography>
-                    )}
-
-                    {/* 활동 타입 뱃지 */}
-                    {activity.activity_type === 'cache_hit' && (
-                      <Chip
-                        label="캐시 히트"
-                        size="small"
-                        color="success"
-                        variant="outlined"
-                        sx={{ mt: 0.5, height: 20, fontSize: '0.7rem' }}
-                      />
-                    )}
-                    {activity.activity_type === 'error' && (
-                      <Chip
-                        label="오류"
-                        size="small"
-                        color="error"
-                        variant="outlined"
-                        sx={{ mt: 0.5, height: 20, fontSize: '0.7rem' }}
-                      />
+                    {/* 상세 정보 (선택 시 또는 확장 모드) */}
+                    {(selectedActivity?.id === activity.id || (expanded && activity.details && Object.keys(activity.details).length > 0)) && (
+                      <Box
+                        sx={{
+                          mt: 1,
+                          p: 1,
+                          bgcolor: 'action.hover',
+                          borderRadius: 1,
+                          fontSize: '0.75rem',
+                        }}
+                      >
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
+                          <Typography variant="caption" fontWeight={600}>상세 정보</Typography>
+                          <IconButton
+                            size="small"
+                            onClick={(e) => { e.stopPropagation(); handleCopyActivity(activity); }}
+                            sx={{ p: 0.3 }}
+                          >
+                            <ContentCopyIcon sx={{ fontSize: 14 }} />
+                          </IconButton>
+                        </Box>
+                        <Typography
+                          component="pre"
+                          sx={{
+                            m: 0,
+                            fontFamily: 'monospace',
+                            fontSize: '0.7rem',
+                            whiteSpace: 'pre-wrap',
+                            wordBreak: 'break-all',
+                            color: 'text.secondary',
+                            maxHeight: 150,
+                            overflow: 'auto',
+                          }}
+                        >
+                          {JSON.stringify(activity.details, null, 2)}
+                        </Typography>
+                      </Box>
                     )}
                   </Box>
                 </Box>

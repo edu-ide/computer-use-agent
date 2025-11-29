@@ -130,6 +130,7 @@ class WorkflowRegistry:
             if instance._current_state is None:
                 instance._current_state = {
                     "workflow_id": instance.config.id,
+                    "execution_id": execution_id,  # 실행 ID 추가
                     "status": "failed",
                     "error": str(e),
                     "start_time": datetime.now().isoformat(),

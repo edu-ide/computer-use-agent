@@ -43,6 +43,17 @@ export interface WorkflowContext {
   completedNodes: string[];
   failedNodes: string[];
 
+  // 현재 노드 상세 정보 (실시간 모니터링용)
+  currentNodeStartTime: string | null;
+  currentThought: string | null;
+  currentAction: string | null;
+  currentObservation: string | null;
+  stepCount: number | null;
+
+  // 에러 추적 정보
+  consecutiveErrors: number | null;
+  lastError: string | null;
+
   // VLM 스텝
   vlmSteps: VLMStep[];
   lastScreenshot: string | null;
@@ -64,6 +75,15 @@ export type WorkflowEvent =
       status: ExecutionStatus;
       allSteps?: VLMStep[];
       lastScreenshot?: string | null;
+      // 현재 노드 상세 정보
+      currentNodeStartTime?: string | null;
+      currentThought?: string | null;
+      currentAction?: string | null;
+      currentObservation?: string | null;
+      stepCount?: number | null;
+      // 에러 추적 정보
+      consecutiveErrors?: number | null;
+      lastError?: string | null;
     }
   | { type: 'WS_STEP'; step: VLMStep }
   | { type: 'WS_COMPLETE'; status: string; error: string | null }
@@ -83,6 +103,15 @@ const initialContext: WorkflowContext = {
   currentNode: null,
   completedNodes: [],
   failedNodes: [],
+  // 현재 노드 상세 정보
+  currentNodeStartTime: null,
+  currentThought: null,
+  currentAction: null,
+  currentObservation: null,
+  stepCount: null,
+  // 에러 추적 정보
+  consecutiveErrors: null,
+  lastError: null,
   vlmSteps: [],
   lastScreenshot: null,
   error: null,
@@ -132,6 +161,15 @@ export const workflowMachine = setup({
         vlmSteps: event.allSteps || context.vlmSteps,
         lastScreenshot: event.lastScreenshot ?? context.lastScreenshot,
         error: event.status.error,
+        // 현재 노드 상세 정보
+        currentNodeStartTime: event.currentNodeStartTime ?? null,
+        currentThought: event.currentThought ?? null,
+        currentAction: event.currentAction ?? null,
+        currentObservation: event.currentObservation ?? null,
+        stepCount: event.stepCount ?? null,
+        // 에러 추적 정보
+        consecutiveErrors: event.consecutiveErrors ?? null,
+        lastError: event.lastError ?? null,
       };
     }),
     addStep: assign({
@@ -159,6 +197,14 @@ export const workflowMachine = setup({
       error: null,
       lastScreenshot: null,
       executionStatus: null,
+      // 현재 노드 상세 정보 초기화
+      currentNodeStartTime: null,
+      currentThought: null,
+      currentAction: null,
+      currentObservation: null,
+      stepCount: null,
+      consecutiveErrors: null,
+      lastError: null,
     }),
   },
   guards: {

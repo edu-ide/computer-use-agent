@@ -24,6 +24,8 @@ class StartWorkflowRequest(BaseModel):
     execution_id: Optional[str] = None
     use_vlm_agent: bool = True  # VLM 에이전트 사용 여부
     model_id: str = "local-qwen3-vl"
+    agent_type: str = "web"  # "vlm" 또는 "web" - web이면 봇 감지 체크 활성화
+    check_bot_detection: bool = True  # 봇 감지 체크 활성화 여부
 
 
 # === 워크플로우 정의 조회 ===
@@ -88,6 +90,8 @@ async def start_workflow(workflow_id: str, request: StartWorkflowRequest):
                 model_id=request.model_id,
                 max_steps=15,
                 data_dir=f"/tmp/workflow_agent/{temp_id}",
+                agent_type=request.agent_type,
+                check_bot_detection=request.check_bot_detection,
             )
 
             # 에이전트 초기화
