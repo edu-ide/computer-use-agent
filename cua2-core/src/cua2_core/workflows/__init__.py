@@ -16,6 +16,7 @@ from .coupang_workflow import CoupangCollectWorkflow
 from .youtube_workflow import YouTubeContentWorkflow
 from .google_search_workflow import GoogleSearchWorkflow
 from .aliexpress_workflow import AliExpressWorkflow
+from .steady_dancer_workflow import SteadyDancerWorkflow
 from .common_subgraphs import CommonSubgraphs
 
 __all__ = [
@@ -31,5 +32,6 @@ __all__ = [
     "YouTubeContentWorkflow",
     "GoogleSearchWorkflow",
     "AliExpressWorkflow",
+    "SteadyDancerWorkflow",
     "CommonSubgraphs",
 ]

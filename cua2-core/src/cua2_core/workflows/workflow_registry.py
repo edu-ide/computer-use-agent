@@ -38,11 +38,13 @@ class WorkflowRegistry:
         from .youtube_workflow import YouTubeContentWorkflow
         from .google_search_workflow import GoogleSearchWorkflow
         from .aliexpress_workflow import AliExpressWorkflow
+        from .steady_dancer_workflow import SteadyDancerWorkflow
 
         self.register(CoupangCollectWorkflow)
         self.register(YouTubeContentWorkflow)
         self.register(GoogleSearchWorkflow)
         self.register(AliExpressWorkflow)
+        self.register(SteadyDancerWorkflow)
 
         # Register new API workflow
         try:

@@ -28,7 +28,8 @@ const App = () => {
       <CssBaseline />
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={<Welcome />} />
+          <Route path="/" element={<WorkflowList />} />
+          <Route path="/welcome" element={<Welcome />} />
           <Route path="/task" element={<Task />} />
           <Route path="/products" element={<Products />} />
           <Route path="/workflows" element={<WorkflowList />} />

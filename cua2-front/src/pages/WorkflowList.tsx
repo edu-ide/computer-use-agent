@@ -21,10 +21,11 @@ import {
   Button,
 } from '@mui/material';
 import { FiPackage } from 'react-icons/fi';
-import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
 import YouTubeIcon from '@mui/icons-material/YouTube';
 import AccountTreeIcon from '@mui/icons-material/AccountTree';
+import MusicVideoIcon from '@mui/icons-material/MusicVideo';
+import SearchIcon from '@mui/icons-material/Search';
 import DarkModeOutlined from '@mui/icons-material/DarkModeOutlined';
 import LightModeOutlined from '@mui/icons-material/LightModeOutlined';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
@@ -39,6 +40,8 @@ const ICON_MAP: Record<string, React.ElementType> = {
   ShoppingCart: ShoppingCartIcon,
   YouTube: YouTubeIcon,
   AccountTree: AccountTreeIcon,
+  MusicVideo: MusicVideoIcon,
+  Search: SearchIcon,
 };
 
 const WorkflowList: React.FC = () => {
@@ -79,13 +82,10 @@ const WorkflowList: React.FC = () => {
   }
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
+    <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', overflow: 'auto' }}>
       {/* 상단 앱바 */}
       <AppBar position="static" color="default" elevation={0} sx={{ borderBottom: '1px solid', borderColor: 'divider' }}>
         <Toolbar>
-          <IconButton edge="start" onClick={() => navigate('/')} sx={{ mr: 2 }}>
-            <ArrowBackIcon />
-          </IconButton>
           <AccountTreeIcon sx={{ mr: 1.5, color: 'primary.main' }} />
           <Typography variant="h6" sx={{ flexGrow: 1, fontWeight: 600 }}>
             워크플로우
