@@ -78,7 +78,7 @@ fi
 echo "[4/6] 프론트엔드 의존성 확인 중..."
 if [ ! -d "$BASE_DIR/cua2-front/node_modules" ]; then
     echo "  - npm 패키지 설치 중..."
-    cd "$BASE_DIR/cua2-front" && npm install || { echo "npm 설치 실패!"; exit 1; }
+    cd "$BASE_DIR/cua2-front" && npm install --legacy-peer-deps || { echo "npm 설치 실패!"; exit 1; }
 else
     echo "  - node_modules 이미 존재"
 fi

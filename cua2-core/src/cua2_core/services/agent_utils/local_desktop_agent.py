@@ -6,7 +6,7 @@ import os
 import time
 import unicodedata
 
-from cua2_core.services.agent_utils.prompt import E2B_SYSTEM_PROMPT_TEMPLATE
+from cua2_core.services.agent_utils.prompt import E2B_SYSTEM_PROMPT_TEMPLATE, GELab_NATIVE_PROMPT_TEMPLATE
 from cua2_core.services.local_desktop import LocalDesktop
 
 from smolagents import CodeAgent, Model, tool
@@ -54,7 +54,8 @@ class LocalVisionAgent(CodeAgent):
             **kwargs,
         )
 
-        self.prompt_templates["system_prompt"] = E2B_SYSTEM_PROMPT_TEMPLATE.replace(
+        # GELab Native Prompt 사용 (GELab 모델의 네이티브 포맷 지원)
+        self.prompt_templates["system_prompt"] = GELab_NATIVE_PROMPT_TEMPLATE.replace(
             "<<resolution_x>>", str(self.width)
         ).replace("<<resolution_y>>", str(self.height))
 
@@ -358,6 +359,19 @@ class LocalVisionAgent(CodeAgent):
             return f"Opened URL: {url}"
 
         @tool
+        def press(keys: list[str]) -> str:
+            """
+            키보드 키 입력 (예: ['Enter'], ['ctrl', 'c'])
+            Args:
+                keys: 누를 키 목록
+            """
+            self.desktop.press(keys)
+            time.sleep(0.5)
+            self.logger.log(f"키 입력: {keys}")
+            print(f"Executed: Pressed keys {keys}")
+            return f"Pressed keys {keys}"
+
+        @tool
         def launch(app: str) -> str:
             """
             애플리케이션 실행
@@ -430,6 +444,18 @@ class SanitizedExecutorProxy:
             cleaned_code = cleaned_code.replace("drag(", "drag_pixels(")
             print("[Sanitizer] Pixel mode enabled: Redirecting click/drag to pixel versions")
 
+        # 4. GELab Native Format Transpiler 
+        # (explain:xxx	action:CLICK	point:x,y ...) -> click(x,y)
+        if "action:" in cleaned_code and "\t" in cleaned_code:
+            try:
+                transpiled_code = self._transpile_gelab_to_python(cleaned_code)
+                print(f"[Sanitizer] GELab Native command detected. Transpiling:\nReference: {cleaned_code}\nResult: {transpiled_code}")
+                cleaned_code = transpiled_code
+            except Exception as e:
+                print(f"[Sanitizer] Transpilation failed: {e}")
+                # 실패 시 원본 시도 (혹시나 하여)
+
+
         # 디버깅 로깅
         if cleaned_code != code:
             print(f"[Sanitizer] 코드 자동 수정됨:\nOriginal: {code}\nModified: {cleaned_code}")
@@ -441,3 +467,87 @@ class SanitizedExecutorProxy:
             # 오류 발생 시 원본 코드로 재시도? 아니면 오류 전파?
             # 구문 오류일 가능성이 높으므로 전파
             raise e
+    def _transpile_gelab_to_python(self, command_str: str) -> str:
+        """
+        GELab Native Format (Tab-separated) to Python Tool Call conversion
+        Format: explain:...\taction:TYPE\tpoint:x,y\t...
+        """
+        # Handle literal \t if model escapes it
+        command_str = command_str.replace('\\t', '\t')
+        parts = {}
+        for part in command_str.split('\t'):
+            if ':' in part:
+                key, value = part.split(':', 1)
+                parts[key.strip()] = value.strip()
+        
+        action_type = parts.get('action', '').upper()
+        
+        if action_type == 'CLICK':
+            if 'point' in parts:
+                x, y = map(int, parts['point'].replace(',', ' ').split())
+                return f"click({x}, {y})"
+                
+        elif action_type == 'TYPE':
+            if 'value' in parts:
+                text = parts['value']
+                # If coordinates are provided, click first to ensure focus
+                if 'point' in parts:
+                    x, y = map(int, parts['point'].replace(',', ' ').split())
+                    return f"click({x}, {y}); write('{text}')"
+                return f"write('{text}')"
+
+        elif action_type == 'WAIT':
+            if 'value' in parts:
+                sec = parts['value']
+                return f"wait({sec})"
+
+        elif action_type == 'KEY':
+            raw_val = parts.get('value', 'Enter').strip()
+            # "Ctrl+C" -> ['Ctrl', 'C'] simplistic handling
+            keys = raw_val.split('+')
+            keys = [k.strip() for k in keys]
+            return f"press({keys})"
+
+        elif action_type == 'SCROLL':
+            if 'direction' in parts:
+                direction = parts['direction'].lower()
+                
+                # GELab usually provides 'value' in pixels (e.g. 50, 100)
+                # We need to convert this to 'wheel clicks' for xdotool
+                # Assumption: 1 click ≈ 20-30 pixels. Let's be aggressive: value // 10
+                raw_val = parts.get('value', '50')
+                try:
+                    pixels = int(raw_val)
+                    # Boost minimum scroll to 5 to prevent "micro-scroll" loops
+                    amount = max(5, pixels // 10) 
+                except:
+                    amount = 5
+
+                # 좌표가 있으면 이동 후 스크롤? (현재는 단순 스크롤)
+                if 'point' in parts:
+                     x, y = map(int, parts['point'].replace(',', ' ').split())
+                     return f"move_mouse({x}, {y}); scroll(0, 0, '{direction}', {amount})"
+                return f"scroll(0, 0, '{direction}', {amount})"
+
+        elif action_type == 'LAUNCH':
+            if 'value' in parts:
+                app = parts['value']
+                if app.lower() == 'chrome':
+                    return 'launch("google-chrome")' # 매핑 보정
+                return f"launch('{app}')"
+
+        elif action_type == 'OPEN_URL':
+            if 'value' in parts:
+                url = parts['value']
+                return f"open_url('{url}')"
+
+        elif action_type == 'COMPLETE':
+            summary = parts.get('return', 'Task Completed')
+            return f"final_answer('{summary}')"
+
+        elif action_type == 'ABORT':
+            reason = parts.get('value', 'Aborted')
+            return f"final_answer('[ABORT] {reason}')"
+            
+        # 매핑되지 않은 경우 원본 반환 (에러 유발 가능성 있음)
+        raise ValueError(f"Unknown GELab action: {action_type}")

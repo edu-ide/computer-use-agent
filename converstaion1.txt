@@ -1,0 +1,25 @@
+
+╭─── Claude Code v2.0.60 ──────────────────────────────────────────────────────╮
+│                                           │ Tips for getting started         │
+│           Welcome back Yeo Won!           │ Run /init to create a CLAUDE.md… │
+│                                           │ ──────────────────────────────── │
+│                  ▐▛███▜▌                  │ Recent activity                  │
+│                 ▝▜█████▛▘                 │ No recent activity               │
+│                   ▘▘ ▝▝                   │                                  │
+│                                           │                                  │
+│           Opus 4.5 · Claude Max           │                                  │
+│   /mnt/sda1/projects/computer-use-agent   │                                  │
+╰──────────────────────────────────────────────────────────────────────────────╯
+══════════════════ Conversation compacted · ctrl+o for history ═════════════════
+  ⎿  Read cua2-core/src/cua2_core/fara/web_surfer.py (433 lines)
+  ⎿  Referenced file cua2-core/src/cua2_core/fara/playwright_controller.py
+  ⎿  Read cua2-core/src/cua2_core/fara/__init__.py (28 lines)
+  ⎿ Read cua2-core/src/cua2_core/workflows/google_search_workflow.py (368 lines)
+
+  ⎿  Read cua2-core/src/cua2_core/services/agent_utils/get_model.py (43 lines)
+  ⎿  Limit reached · resets 1am (Asia/Seoul) · /upgrade to Max 20x or turn on 
+     /extra-usage
+     /upgrade to increase your usage limit.
+
+
+

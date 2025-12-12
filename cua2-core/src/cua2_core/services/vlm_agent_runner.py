@@ -19,6 +19,7 @@ from cua2_core.services.agent_utils.get_model import get_model
 from cua2_core.services.agent_utils.local_desktop_agent import LocalVisionAgent
 from cua2_core.services.agent_utils.function_parser import parse_function_call
 from cua2_core.services.local_sandbox_service import LocalSandboxService
+from cua2_core.services.headless_desktop import HeadlessDesktop
 from cua2_core.services.utils import compress_image_to_max_size
 from cua2_core.services.trace_store import get_trace_store
 from cua2_core.services.orchestrator_service import (
@@ -119,7 +120,11 @@ class VLMAgentRunner:
         # Note: check_bot_detection은 하위 호환성을 위해 파라미터만 유지, 실제로 사용하지 않음
         # VLM이 스크린샷을 보고 직접 [ERROR:BOT_DETECTED] 형식으로 보고함
 
-        self._sandbox_service = LocalSandboxService(max_sandboxes=1)
+        # SandboxService는 'headless_browser' 모드에서는 사용하지 않음
+        if self.agent_type != "headless_browser":
+            self._sandbox_service = LocalSandboxService(max_sandboxes=1)
+        else:
+            self._sandbox_service = None
         self._current_sandbox = None
         self._current_agent: Optional[LocalVisionAgent] = None
         self._session_id: Optional[str] = None
@@ -175,25 +180,35 @@ class VLMAgentRunner:
         session_data_dir = os.path.join(self.data_dir, session_id)
         os.makedirs(session_data_dir, exist_ok=True)
 
-        # 샌드박스 획득
-        max_attempts = 30
-        for attempt in range(max_attempts):
-            response = await self._sandbox_service.acquire_sandbox(session_id)
+        # 샌드박스 획득 (Headless Browser 모드 지원)
+        if self.agent_type == "headless_browser":
+            if self._current_sandbox is None:
+                try:
+                    logger.info("Headless Browser 에이전트 모드: HeadlessDesktop 초기화 중...")
+                    self._current_sandbox = HeadlessDesktop()
+                except Exception as e:
+                    logger.error(f"Headless Desktop 초기화 실패: {e}")
+                    return False
+        else:
+            # 기본 VLM 모드: Xvfb 기반 LocalSandboxService 사용
+            max_attempts = 30
+            for attempt in range(max_attempts):
+                response = await self._sandbox_service.acquire_sandbox(session_id)
 
-            if response.error:
-                logger.error(f"샌드박스 획득 실패: {response.error}")
+                if response.error:
+                    logger.error(f"샌드박스 획득 실패: {response.error}")
+                    await asyncio.sleep(1)
+                    continue
+
+                if response.sandbox is not None and response.state == "ready":
+                    self._current_sandbox = response.sandbox
+                    break
+
+                if response.state == "max_sandboxes_reached":
+                    await asyncio.sleep(1)
+                    continue
+
                 await asyncio.sleep(1)
-                continue
-
-            if response.sandbox is not None and response.state == "ready":
-                self._current_sandbox = response.sandbox
-                break
-
-            if response.state == "max_sandboxes_reached":
-                await asyncio.sleep(1)
-                continue
-
-            await asyncio.sleep(1)
 
         if self._current_sandbox is None:
             logger.error(f"샌드박스를 획득할 수 없음: {session_id}")

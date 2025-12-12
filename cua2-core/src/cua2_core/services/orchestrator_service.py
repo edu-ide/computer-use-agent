@@ -223,13 +223,13 @@ class OrchestratorService:
 
     # 사용 가능한 모델 설정
     MODELS: Dict[str, ModelConfig] = {
-        "local-qwen-vl": ModelConfig(
-            model_id="local-qwen-vl",
-            name="Qwen-VL (Local)",
+        "local-fara-7b": ModelConfig(
+            model_id="local-fara-7b",
+            name="Fara-7B (Local SGLang)",
             cost_per_1k_tokens=0.0,
-            avg_latency_ms=500,
+            avg_latency_ms=300,  # ~90 tokens/s
             supports_vision=True,
-            max_complexity=0.5,
+            max_complexity=0.9,  # Fara는 computer use 전용으로 복잡한 작업 가능
         ),
         "gpt-4o-mini": ModelConfig(
             model_id="gpt-4o-mini",
@@ -264,9 +264,9 @@ class OrchestratorService:
         "complex": 0.8,  # 복잡한 작업 (추론 필요)
     }
 
-    # Orchestrator-8B 서버 설정
-    ORCHESTRATOR_API_URL = "http://localhost:8081/v1/chat/completions"
-    ORCHESTRATOR_TIMEOUT = 5.0  # 5초 타임아웃 (빠른 판단 필요)
+    # Fara-7B 서버 설정 (Orchestrator 역할도 Fara가 담당)
+    ORCHESTRATOR_API_URL = "http://localhost:30000/v1/chat/completions"
+    ORCHESTRATOR_TIMEOUT = 10.0  # 10초 타임아웃
 
     # Note: Rule-based BOT_DETECTION_PATTERNS / FAILURE_PATTERNS 제거됨
     # VLM이 스크린샷을 보고 직접 [ERROR:TYPE] 형식으로 보고함
@@ -686,17 +686,18 @@ class OrchestratorService:
                 cache_key_params=learned_cache_key_params,
             )
 
-        # 3. VLM Agent - 복잡도에 따른 모델 선택
+        # 3. VLM Agent - Fara-7B 단독 사용 (복잡도 무관)
+        # Fara-7B는 computer use 전용 모델로 모든 복잡도의 작업을 처리 가능
         if score <= self.COMPLEXITY_THRESHOLDS["simple"]:
-            # 단순 작업 - 로컬 모델
+            # 단순 작업 - 로컬 Fara-7B
             if self._prefer_local:
                 return ExecutionDecision(
                     strategy=ExecutionStrategy.LOCAL_MODEL,
-                    model_id="local-qwen-vl",
+                    model_id="local-fara-7b",
                     reason=f"단순 작업 (complexity={score:.2f})",
-                    estimated_time_ms=self.MODELS["local-qwen-vl"].avg_latency_ms,
+                    estimated_time_ms=self.MODELS["local-fara-7b"].avg_latency_ms,
                     estimated_cost=0.0,
-                    confidence=0.85,
+                    confidence=0.9,  # Fara는 computer use 전용이라 신뢰도 높음
                     agent_type=agent_type,
                     max_tokens=max_tokens,
                     reusable=learned_reusable,
@@ -1019,7 +1020,7 @@ Instruction: {instruction}"""
             response = await client.post(
                 self._orchestrator_url,
                 json={
-                    "model": "orchestrator-8b",
+                    "model": "fara-7b",
                     "messages": [
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_content},
@@ -1063,14 +1064,14 @@ Instruction: {instruction}"""
                 }
                 strategy = strategy_map.get(strategy_str, ExecutionStrategy.CLOUD_LIGHT)
 
-                # 모델 ID 기본값
+                # 모델 ID 기본값 - Fara-7B 우선 사용
                 if not model_id:
                     model_defaults = {
-                        ExecutionStrategy.LOCAL_MODEL: "local-qwen-vl",
-                        ExecutionStrategy.CLOUD_LIGHT: "gpt-4o-mini",
-                        ExecutionStrategy.CLOUD_HEAVY: "gpt-4o",
+                        ExecutionStrategy.LOCAL_MODEL: "local-fara-7b",
+                        ExecutionStrategy.CLOUD_LIGHT: "local-fara-7b",  # 클라우드 대신 로컬 Fara 사용
+                        ExecutionStrategy.CLOUD_HEAVY: "local-fara-7b",  # 클라우드 대신 로컬 Fara 사용
                     }
-                    model_id = model_defaults.get(strategy, "gpt-4o-mini")
+                    model_id = model_defaults.get(strategy, "local-fara-7b")
 
                 return ExecutionDecision(
                     strategy=strategy,
@@ -1721,7 +1722,7 @@ Decide how to handle this error (JSON only):"""
             response = await client.post(
                 self._orchestrator_url,
                 json={
-                    "model": "orchestrator-8b",
+                    "model": "fara-7b",
                     "messages": [
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_content},
@@ -1756,7 +1757,7 @@ Decide how to handle this error (JSON only):"""
 
             return ErrorDecision(
                 action=action,
-                reason=data.get("reason", "Orchestrator 결정"),
+                reason=data.get("reason", "Fara-7B 결정"),
                 retry_count=current_retry,
                 max_retries=3,
                 fallback_strategy=self._get_fallback_strategy(strategy) if action == ErrorAction.FALLBACK else None,
@@ -1765,7 +1766,7 @@ Decide how to handle this error (JSON only):"""
             )
 
         except Exception as e:
-            logger.warning(f"[Orchestrator] 에러 핸들링 질의 실패: {e}")
+            logger.warning(f"[Fara-7B] 에러 핸들링 질의 실패: {e}")
             return None
 
     # ===============================

@@ -13,6 +13,7 @@ from .workflow_base import (
 from .workflow_registry import WorkflowRegistry, get_workflow_registry
 from .coupang_workflow import CoupangCollectWorkflow
 from .youtube_workflow import YouTubeContentWorkflow
+from .google_search_workflow import GoogleSearchWorkflow
 from .common_subgraphs import CommonSubgraphs
 
 __all__ = [
@@ -26,5 +27,6 @@ __all__ = [
     "get_workflow_registry",
     "CoupangCollectWorkflow",
     "YouTubeContentWorkflow",
+    "GoogleSearchWorkflow",
     "CommonSubgraphs",
 ]

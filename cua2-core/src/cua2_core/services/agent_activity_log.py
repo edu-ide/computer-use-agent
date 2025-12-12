@@ -18,6 +18,7 @@ class AgentType(Enum):
     """에이전트 유형"""
     ORCHESTRATOR = "orchestrator"  # Orchestrator-8B
     VLM = "vlm"  # Qwen3-VL
+    FARA = "fara"  # Fara-7B (GUI Agent)
     MEMORY = "memory"  # Letta Memory
     TRACE = "trace"  # Trace Store
 
@@ -243,6 +244,12 @@ class AgentActivityLog:
                 "color": "#3B82F6",  # blue
             },
             {
+                "type": AgentType.FARA.value,
+                "name": "Fara-7B",
+                "icon": "🖥️",
+                "color": "#EC4899",  # pink
+            },
+            {
                 "type": AgentType.MEMORY.value,
                 "name": "Letta Memory",
                 "icon": "💾",
@@ -308,6 +315,20 @@ def log_vlm(
     """VLM 활동 로그"""
     return get_agent_activity_log().log(
         AgentType.VLM,
+        activity_type,
+        message,
+        **kwargs
+    )
+
+
+def log_fara(
+    activity_type: ActivityType,
+    message: str,
+    **kwargs
+) -> AgentActivity:
+    """Fara-7B 활동 로그"""
+    return get_agent_activity_log().log(
+        AgentType.FARA,
         activity_type,
         message,
         **kwargs

@@ -35,8 +35,10 @@ class WorkflowRegistry:
         """기본 워크플로우 등록"""
         from .coupang_workflow import CoupangCollectWorkflow
         from .youtube_workflow import YouTubeContentWorkflow
+        from .google_search_workflow import GoogleSearchWorkflow
         self.register(CoupangCollectWorkflow)
         self.register(YouTubeContentWorkflow)
+        self.register(GoogleSearchWorkflow)
 
     def register(self, workflow_class: Type[WorkflowBase]):
         """워크플로우 클래스 등록"""
