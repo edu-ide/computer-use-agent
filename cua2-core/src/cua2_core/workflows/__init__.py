@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 LangGraph 기반 워크플로우 시스템
 """
@@ -13,6 +14,7 @@ from .workflow_base import (
 from .workflow_registry import WorkflowRegistry, get_workflow_registry
 from .coupang_workflow import CoupangCollectWorkflow
 from .youtube_workflow import YouTubeContentWorkflow
+from .aliexpress_workflow import AliExpressWorkflow
 from .common_subgraphs import CommonSubgraphs
 
 __all__ = [
@@ -26,5 +28,6 @@ __all__ = [
     "get_workflow_registry",
     "CoupangCollectWorkflow",
     "YouTubeContentWorkflow",
+    "AliExpressWorkflow",
     "CommonSubgraphs",
 ]

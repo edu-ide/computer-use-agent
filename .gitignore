@@ -228,3 +228,11 @@ dist-ssr
 *.sw?
 
 data/
+
+# Local LLM / Large Model artifacts
+llama.cpp/
+models/
+
+# Local test scripts
+start_sglang_server.sh
+test_gelab_zero.py

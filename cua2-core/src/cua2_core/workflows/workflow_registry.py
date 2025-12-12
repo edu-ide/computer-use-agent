@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 워크플로우 레지스트리 - 모든 워크플로우 관리
 """
@@ -35,8 +36,18 @@ class WorkflowRegistry:
         """기본 워크플로우 등록"""
         from .coupang_workflow import CoupangCollectWorkflow
         from .youtube_workflow import YouTubeContentWorkflow
+        from .aliexpress_workflow import AliExpressWorkflow
+        
         self.register(CoupangCollectWorkflow)
         self.register(YouTubeContentWorkflow)
+        self.register(AliExpressWorkflow)
+
+        # Register new API workflow
+        try:
+            from .coupang_api_workflow import CoupangApiWorkflow
+            self.register(CoupangApiWorkflow)
+        except ImportError as e:
+            print(f"Failed to register CoupangApiWorkflow: {e}")
 
     def register(self, workflow_class: Type[WorkflowBase]):
         """워크플로우 클래스 등록"""
