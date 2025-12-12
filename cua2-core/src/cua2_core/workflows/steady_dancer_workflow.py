@@ -43,12 +43,14 @@ class SteadyDancerWorkflow(WorkflowBase):
     """
 
     # ComfyUI SteadyDancer 워크플로우 템플릿 경로
-    COMFYUI_WORKFLOW_PATH = "/mnt/sda1/Download/wanvideo_SteadyDancer_example_01.json"
+    # COMFYUI_WORKFLOW_PATH = "/mnt/sda1/Download/wanvideo_SteadyDancer_example_01.json"
+    COMFYUI_WORKFLOW_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))), "assets", "wanvideo_SteadyDancer_example_01.json")
 
     # 기본 설정
     COMFYUI_URL = "http://127.0.0.1:8188"
-    FLUX2_MODEL_PATH = "/mnt/sda1/projects/flux2_model"
-    OUTPUT_DIR = "/mnt/sda1/projects/computer-use-agent/outputs/steady_dancer"
+    FLUX2_MODEL_PATH = "flux2_model" # Relative or absolute path to model
+    # OUTPUT_DIR = "/mnt/sda1/projects/computer-use-agent/outputs/steady_dancer"
+    OUTPUT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))), "results", "steady_dancer")
 
     # YouTube API
     YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "")
