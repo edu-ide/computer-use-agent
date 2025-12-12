@@ -83,10 +83,15 @@ else
     echo "  - node_modules 이미 존재"
 fi
 
+# 로그 디렉토리 생성
+mkdir -p "$BASE_DIR/logs"
+
 # 백엔드 시작 (포트 8000)
 echo "[5/6] 백엔드 서버 시작 중... (포트 8000)"
 cd "$BASE_DIR/cua2-core"
-python3 -m uvicorn cua2_core.main:app --reload --host 0.0.0.0 --port 8000 &
+# python3 -m uvicorn cua2_core.main:app --reload --host 0.0.0.0 --port 8000 &
+# 로그를 파일과 터미널 모두에 출력
+python3 -m uvicorn cua2_core.main:app --reload --host 0.0.0.0 --port 8000 2>&1 | tee "$BASE_DIR/logs/backend.log" &
 BACKEND_PID=$!
 
 sleep 2
@@ -94,7 +99,9 @@ sleep 2
 # 프론트엔드 시작 (포트 5173)
 echo "[6/6] 프론트엔드 서버 시작 중... (포트 5173)"
 cd "$BASE_DIR/cua2-front"
-npm run dev &
+# npm run dev &
+# 로그를 파일과 터미널 모두에 출력
+npm run dev 2>&1 | tee "$BASE_DIR/logs/frontend.log" &
 FRONTEND_PID=$!
 
 echo ""

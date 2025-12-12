@@ -190,6 +190,7 @@ class CoupangApiWorkflow(WorkflowBase):
         return NodeResult(success=False, error=f"Unknown node: {node_name}")
 
     async def _run_scraper_node(self, state: WorkflowState) -> NodeResult:
+        print("[CoupangApiWorkflow] _run_scraper_node STARTED")
         """Run the scraper logic"""
         if not SCRAPER_AVAILABLE:
             return NodeResult(
@@ -309,8 +310,10 @@ class CoupangApiWorkflow(WorkflowBase):
                 result = await loop.run_in_executor(None, run_wrapper)
                 
                 # Extract results
+                print(f"[CoupangApiWorkflow] Scraper returned type: {type(result)}")
                 if isinstance(result, dict):
                     items = result.get('main_results', [])
+                    print(f"[CoupangApiWorkflow] main_results count: {len(items)}")
                     related = result.get('related_keywords', [])
                     
                     # 연관 검색어 저장

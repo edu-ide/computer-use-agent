@@ -213,6 +213,10 @@ class SteadyDancerWorkflow(WorkflowBase):
                     data={"generated_image_path": existing_image}
                 )
 
+            # Flux2 모델 경로 확인
+            if not os.path.exists(self.FLUX2_MODEL_PATH):
+                return NodeResult(success=False, error=f"Flux2 모델을 찾을 수 없습니다: {self.FLUX2_MODEL_PATH}. 모델을 설치해주세요.")
+
             image_prompt = parameters.get("image_prompt", "beautiful woman, full body, white background")
 
             # 출력 경로
@@ -439,6 +443,10 @@ print("Image saved to {output_path}")
             print(f"  - 이미지: {image_path}")
             print(f"  - 영상: {video_path}")
             print(f"  - 프롬프트: {video_prompt}")
+
+            # ComfyUI 워크플로우 템플릿 확인
+            if not os.path.exists(self.COMFYUI_WORKFLOW_PATH):
+                return NodeResult(success=False, error=f"ComfyUI 워크플로우 템플릿을 찾을 수 없습니다: {self.COMFYUI_WORKFLOW_PATH}. 파일을 assets 폴더에 넣어주세요.")
 
             # ComfyUI 워크플로우 로드 및 수정
             with open(self.COMFYUI_WORKFLOW_PATH, "r") as f:
