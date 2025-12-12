@@ -5,6 +5,7 @@ Computer Use Agent 2.0 Core - VLM 기반 워크플로우 자동화 시스템
 ## 주요 기능
 
 ### 핵심 기능
+
 - **SQLite 영구 Checkpointing**: 서버 재시작 후에도 상태 복구 가능
 - **Streaming Mode 최적화**: updates 모드로 네트워크 효율성 75% 향상
 - **planning_interval**: 매 스텝마다 계획 재수립 (적응형 실행)
@@ -13,6 +14,7 @@ Computer Use Agent 2.0 Core - VLM 기반 워크플로우 자동화 시스템
 - **High-Level Tools**: 저수준 도구를 조합한 고수준 도구
 
 ### 고급 기능
+
 - **Time Travel Debugging**: 실행 히스토리 조회 및 특정 시점으로 되돌리기
 - **Dynamic Breakpoints**: 런타임 브레이크포인트로 디버깅
 - **Tool Error Recovery**: 자동 에러 복구 (재시도, 대체 도구, 롤백)
@@ -61,6 +63,7 @@ Computer Use Agent 2.0 Core - VLM 기반 워크플로우 자동화 시스템
 NVIDIA ToolOrchestra 논문(arXiv:2511.21689) 기반 구현
 
 #### StrategySelector
+
 - 노드 복잡도 분석 (비전, 추론, 데이터 추출 등)
 - 복잡도 기반 모델 선택:
   - 단순 작업 → 로컬 모델 (Qwen-VL)
@@ -68,11 +71,13 @@ NVIDIA ToolOrchestra 논문(arXiv:2511.21689) 기반 구현
   - 복잡한 작업 → 고성능 모델 (GPT-4o, Claude)
 
 #### WorkflowMonitor
+
 - 워크플로우 실행 상태 추적
 - Stuck 노드 감지
 - 실행 리포트 생성
 
 #### StepEvaluator
+
 - VLM 스텝별 실시간 평가
 - 반복 실패 감지 및 Early Stop
 - 상황별 프롬프트 주입 (팝업, 로딩 등)
@@ -83,6 +88,7 @@ NVIDIA ToolOrchestra 논문(arXiv:2511.21689) 기반 구현
 VLM이 스크린샷을 보고 직접 에러를 감지하여 `[ERROR:TYPE]` 형식으로 보고합니다.
 
 #### VLM 에러 타입
+
 ```python
 class VLMErrorType(str, Enum):
     NONE = "none"
@@ -95,6 +101,7 @@ class VLMErrorType(str, Enum):
 ```
 
 #### 조건부 라우팅 (LangGraph)
+
 ```python
 # workflow_base.py
 def _create_router(self, node: WorkflowNode) -> Callable:
@@ -182,6 +189,7 @@ feedback = evaluator.evaluate_step(
 ## 새 기능 사용 예시
 
 ### SQLite Checkpointing (워크플로우 복구)
+
 ```python
 # 영구 저장소 사용 (기본값)
 class MyWorkflow(WorkflowBase):
@@ -199,6 +207,7 @@ checkpoint = await workflow.get_checkpoint(thread_id)
 ```
 
 ### Multi-Agent System
+
 ```python
 from cua2_core.services.multi_agent import ManagerAgent, WorkflowStep
 
@@ -220,6 +229,7 @@ result = await manager.search_and_analyze("노트북", pages=3, validate=True)
 ```
 
 ### Common Subgraphs (에러 처리 재사용)
+
 ```python
 from cua2_core.workflows.common_subgraphs import CommonSubgraphs
 
@@ -246,6 +256,7 @@ class MyWorkflow(WorkflowBase):
 ```
 
 ### High-Level Tools
+
 ```python
 from cua2_core.services.agent_utils.high_level_tools import create_high_level_tools
 
@@ -362,6 +373,7 @@ workflow.clear_breakpoints()
 ```
 
 #### REST API
+
 ```bash
 # 브레이크포인트 조회
 GET /workflow/{workflow_id}/breakpoints
@@ -420,14 +432,15 @@ if result.success:
 ```
 
 #### 복구 전략
-| 전략 | 설명 | 적용 에러 타입 |
-|------|------|---------------|
-| `RETRY` | Exponential backoff로 재시도 | TIMEOUT, NETWORK_ERROR, RATE_LIMITED |
-| `ALTERNATIVE` | 대체 도구 사용 | ELEMENT_NOT_FOUND |
-| `ROLLBACK` | 이전 상태로 롤백 | 설정 가능 |
-| `SKIP` | 현재 작업 건너뛰기 | INVALID_INPUT |
-| `USER_INPUT` | 사용자 입력 요청 | 설정 가능 |
-| `ABORT` | 실행 중단 | PERMISSION_DENIED, UNKNOWN |
+
+| 전략            | 설명                         | 적용 에러 타입                       |
+| --------------- | ---------------------------- | ------------------------------------ |
+| `RETRY`       | Exponential backoff로 재시도 | TIMEOUT, NETWORK_ERROR, RATE_LIMITED |
+| `ALTERNATIVE` | 대체 도구 사용               | ELEMENT_NOT_FOUND                    |
+| `ROLLBACK`    | 이전 상태로 롤백             | 설정 가능                            |
+| `SKIP`        | 현재 작업 건너뛰기           | INVALID_INPUT                        |
+| `USER_INPUT`  | 사용자 입력 요청             | 설정 가능                            |
+| `ABORT`       | 실행 중단                    | PERMISSION_DENIED, UNKNOWN           |
 
 ### 4. Memory Persistence (SQLite)
 
@@ -573,6 +586,7 @@ user_input = await workflow.request_user_input(
 ```
 
 #### WebSocket 이벤트 타입
+
 ```typescript
 // 확인 요청
 interface ConfirmationRequiredEvent {
@@ -622,6 +636,7 @@ interface BreakpointResumedEvent {
 ```
 
 #### REST API
+
 ```bash
 # 확인 대기 상태 조회
 GET /workflow/{workflow_id}/confirmation
@@ -638,3 +653,5 @@ POST /workflow/{workflow_id}/confirm
 - [NVIDIA ToolOrchestra](https://arxiv.org/abs/2511.21689) - 모델 라우팅 패턴
 - [LangGraph](https://github.com/langchain-ai/langgraph) - 상태 그래프 기반 워크플로우
 - [smolagents](https://github.com/huggingface/smolagents) - VLM 에이전트 실행
+
+./start-local.sh

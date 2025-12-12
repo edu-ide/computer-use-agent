@@ -236,3 +236,7 @@ models/
 # Local test scripts
 start_sglang_server.sh
 test_gelab_zero.py
+
+*.html
+*.jpg
+coupang_results_*.xlsx

@@ -143,7 +143,22 @@ const WorkflowDetail: React.FC = () => {
           defaultParams[param.name] = param.default;
         }
       });
-      send({ type: 'SET_PARAMETERS', parameters: defaultParams });
+
+      // localStorage에서 저장된 파라미터 읽기
+      const storageKey = `workflow_params_${id}`;
+      let savedParams: Record<string, unknown> = {};
+      try {
+        const savedStr = localStorage.getItem(storageKey);
+        if (savedStr) {
+          savedParams = JSON.parse(savedStr);
+        }
+      } catch (e) {
+        console.warn('Failed to load saved params:', e);
+      }
+
+      // 기본값과 저장된 값 병합 (저장된 값 우선)
+      const mergedParams = { ...defaultParams, ...savedParams };
+      send({ type: 'SET_PARAMETERS', parameters: mergedParams });
     } catch (err) {
       console.error('워크플로우 로드 실패:', err);
     } finally {
@@ -291,12 +306,23 @@ const WorkflowDetail: React.FC = () => {
   // 파라미터 변경 핸들러
   const handleParameterChange = useCallback(
     (name: string, value: unknown) => {
+      const updatedParams = { ...parameters, [name]: value };
       send({
         type: 'SET_PARAMETERS',
-        parameters: { ...parameters, [name]: value },
+        parameters: updatedParams,
       });
+
+      // localStorage에 저장
+      if (workflowId) {
+        try {
+          const storageKey = `workflow_params_${workflowId}`;
+          localStorage.setItem(storageKey, JSON.stringify(updatedParams));
+        } catch (e) {
+          console.warn('Failed to save params:', e);
+        }
+      }
     },
-    [parameters, send]
+    [parameters, send, workflowId]
   );
 
   // 상태 표시
